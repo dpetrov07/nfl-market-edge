@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+
+data
+# Live captures are disposable until explicitly promoted.
+data/live/*
+!data/live/.gitkeep

@@ -1,0 +1,4 @@
+requests>=2.32
+pandas>=2.2
+pyarrow>=17.0
+nflreadpy>=0.1.5
