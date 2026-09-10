@@ -89,12 +89,14 @@ python scripts/collect_live_sportsbook_props.py \
   --interval 30
 ```
 
-For Railway, attach a persistent volume at `/data` and set:
+For the Railway service named `sportsbook-collector`, attach its own persistent
+volume at `/data` and set:
 
 ```text
 SPORTSBOOK_GAME=SF 49ers @ LA Rams
-SPORTSBOOK_OUTPUT_DIR=/data
+SPORTSBOOK_BOOKS=draftkings,bovada
 SPORTSBOOK_POLL_SECONDS=30
+SPORTSBOOK_OUTPUT_DIR=/data/sportsbook_live
 ```
 
 Use `python scripts/collect_live_sportsbook_props.py` as that Railway service's
@@ -115,13 +117,28 @@ KALSHI_PRIVATE_KEY=/absolute/path/to/kalshi-private-key.pem \
 python scripts/collect_live_kalshi_ws.py --game SF_LAR --date 2026-09-10
 ```
 
-For a separate Railway worker, use
-`python scripts/collect_live_kalshi_ws.py` as the start command, attach a volume
-at `/data`, and set `KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY`, `KALSHI_GAME`,
-`KALSHI_GAME_DATE`, and `KALSHI_OUTPUT_DIR=/data/kalshi_live`. The PEM value may
-contain real newlines or escaped `\\n` characters. Each Railway service needs
-its own start command, so the shared `railway.toml` contains only build/restart
-settings.
+For the separate Railway service named `kalshi-collector`, use
+`python scripts/collect_live_kalshi_ws.py` as the start command and attach a
+separate persistent volume at `/data`. Set:
+
+```text
+KALSHI_API_KEY_ID=<your key id>
+KALSHI_PRIVATE_KEY=<the complete PEM private key>
+KALSHI_GAME=SF_LAR
+KALSHI_GAME_DATE=2026-09-10
+KALSHI_CHANNELS=ticker,orderbook_delta,trade
+KALSHI_OUTPUT_DIR=/data/kalshi_live
+```
+
+The PEM value may contain real newlines or escaped `\\n` characters. The two
+services are independent: each has its own process, variables, and `/data`
+volume. The shared `railway.toml` intentionally contains no start command, so
+each service uses the command configured in its Railway settings.
+
+To create both workers, connect the GitHub repository to a new Railway project
+twice. Name the services `sportsbook-collector` and `kalshi-collector`, set the
+respective start command and variables above, then add one volume to each
+service with mount path `/data`. No public domain or cron schedule is needed.
 
 Install the small Python dependency set from `requirements.txt`. The completed
 canonical dataset does not need to be rebuilt for normal inspection.

@@ -390,7 +390,9 @@ def append_records(output_dir: Path, records: list[dict]) -> Path:
 
 def parse_args() -> argparse.Namespace:
     volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
-    default_output = os.getenv("SPORTSBOOK_OUTPUT_DIR") or volume or "data/raw/sportsbook_live"
+    default_output = os.getenv("SPORTSBOOK_OUTPUT_DIR") or (
+        str(Path(volume) / "sportsbook_live") if volume else "data/raw/sportsbook_live"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", default=os.getenv("SPORTSBOOK_GAME"), help="Example: SF 49ers @ LA Rams")
     parser.add_argument(
