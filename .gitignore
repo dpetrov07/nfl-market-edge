@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 *.log
+.env
 
 data
 # Live captures are disposable until explicitly promoted.

@@ -263,6 +263,7 @@ def join_markets(markets: pd.DataFrame, states: pd.DataFrame) -> pd.DataFrame:
         "game_id", "timestamp", "market_id", "ticker", "player", "player_id",
         "team", "opponent", "prop_type", "threshold", "yes_bid", "yes_ask",
         "midpoint", "trade_price", "spread", "volume", "open_interest",
+        "actual_result", "settlement_result", "kickoff",
         "play_id", "play_start_timestamp", "state_available_at",
         "state_time_source", "timing_safe", "play_timestamp",
         "play_timestamp_source", "seconds_since_play",

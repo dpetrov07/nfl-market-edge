@@ -1,4 +1,8 @@
 requests>=2.32
+curl_cffi>=0.16
 pandas>=2.2
 pyarrow>=17.0
 nflreadpy>=0.1.5
+scikit-learn>=1.9
+xgboost>=3.4
+joblib>=1.6

@@ -66,7 +66,40 @@ python scripts/build_2025_prop_history.py --platform kalshi --workers 1
 
 # Reusable live top-of-book collector.
 python scripts/collect_live_props.py --game AWAY_HOME --kickoff YYYY-MM-DDTHH:MM:SSZ
+
+# Price the two-game sportsbook-history spike before using paid API credits.
+python scripts/pull_sportsbook_history.py --estimate-only --include-alternates
+
+# Pull checkpointed 5-minute sportsbook history, then join exact thresholds.
+THE_ODDS_API_KEY=... python scripts/pull_sportsbook_history.py --include-alternates
+python scripts/join_sportsbook_sample.py
 ```
+
+## Live sportsbook player props
+
+The lightweight collector polls DraftKings and Bovada receiving yards, rushing
+yards, and receptions. It appends every offered threshold and its Over/Under
+American odds to a daily JSONL file, along with one source-health record per
+poll. A temporary source error or an empty in-game feed is recorded and retried
+on the next cycle.
+
+```bash
+python scripts/collect_live_sportsbook_props.py \
+  --game "SF 49ers @ LA Rams" \
+  --interval 30
+```
+
+For Railway, attach a persistent volume at `/data` and set:
+
+```text
+SPORTSBOOK_GAME=SF 49ers @ LA Rams
+SPORTSBOOK_OUTPUT_DIR=/data
+SPORTSBOOK_POLL_SECONDS=30
+```
+
+`railway.toml` supplies the worker start command. These public sportsbook feeds
+do not require API credentials, but they may remove or suspend player props
+during a game.
 
 Install the small Python dependency set from `requirements.txt`. The completed
 canonical dataset does not need to be rebuilt for normal inspection.
