@@ -20,6 +20,10 @@ DK_URL = (
     "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1/"
     "leagues/{league}/categories/{category}/subcategories/{subcategory}"
 )
+DK_GAME_URL = (
+    "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1/"
+    "leagues/88808/categories/492/subcategories/4518"
+)
 DK_PROPS = {
     "receiving_yards": (1342, 14114),
     "rushing_yards": (1001, 9514),
@@ -163,6 +167,7 @@ def fetch_draftkings(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                         "player": player.get("name") or market.get("name"),
                         "player_id": str(player.get("id")) if player.get("id") else None,
                         "player_team": player.get("metadata", {}).get("teamAbbreviation"),
+                        "market_type": prop_type,
                         "prop_type": prop_type,
                         "market_id": str(market.get("id")),
                         "threshold": threshold,
@@ -172,6 +177,57 @@ def fetch_draftkings(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                         "under_selection_id": str(under.get("id")) if under.get("id") else None,
                     }
                 )
+    fetched_at = utc_now()
+    try:
+        response = requests.get(DK_GAME_URL, impersonate="chrome120", timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+        events = {str(e["id"]): e for e in payload.get("events", [])}
+        selections = {}
+        for selection in payload.get("selections", []):
+            selections.setdefault(str(selection.get("marketId")), []).append(selection)
+        for market in payload.get("markets", []):
+            market_type = {"Moneyline": "moneyline", "Spread": "spread"}.get(market.get("name"))
+            event = events.get(str(market.get("eventId")))
+            if not market_type or not event or not game_matches(event.get("name", ""), game):
+                continue
+            away, home = split_teams(event)
+            sides = {
+                str(selection.get("outcomeType", "")).lower(): selection
+                for selection in selections.get(str(market.get("id")), [])
+            }
+            away_selection, home_selection = sides.get("away", {}), sides.get("home", {})
+            rows.append(
+                {
+                    "record_type": "quote",
+                    "schema_version": SCHEMA_VERSION,
+                    "poll_id": poll_id,
+                    "sportsbook": "draftkings",
+                    "fetched_at": fetched_at,
+                    "source_update_at": None,
+                    "game": event.get("name"),
+                    "event_id": str(event.get("id")),
+                    "scheduled_start": event.get("startEventDate"),
+                    "event_status": event.get("status"),
+                    "is_live": str(event.get("status", "")).upper()
+                    in {"STARTED", "LIVE", "IN_PROGRESS"},
+                    "away_team": away.get("name"),
+                    "away_team_id": str(away.get("id")) if away.get("id") else None,
+                    "home_team": home.get("name"),
+                    "home_team_id": str(home.get("id")) if home.get("id") else None,
+                    "market_type": market_type,
+                    "prop_type": None,
+                    "market_id": str(market.get("id")),
+                    "away_line": parse_float(away_selection.get("points")),
+                    "home_line": parse_float(home_selection.get("points")),
+                    "away_odds": parse_american(away_selection.get("displayOdds", {}).get("american")),
+                    "home_odds": parse_american(home_selection.get("displayOdds", {}).get("american")),
+                    "away_selection_id": str(away_selection.get("id")) if away_selection.get("id") else None,
+                    "home_selection_id": str(home_selection.get("id")) if home_selection.get("id") else None,
+                }
+            )
+    except Exception as exc:
+        errors.append(f"game_lines: {type(exc).__name__}: {exc}")
     return rows, errors
 
 
@@ -201,6 +257,47 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                 if market.get("status") != "O":
                     continue
                 description = market.get("description", "")
+                market_type = {"Moneyline": "moneyline", "Point Spread": "spread"}.get(description)
+                if market_type and market.get("period", {}).get("main"):
+                    sides = {
+                        str(outcome.get("type", "")).lower(): outcome
+                        for outcome in market.get("outcomes", [])
+                        if outcome.get("status") == "O"
+                    }
+                    away_selection, home_selection = sides.get("a", {}), sides.get("h", {})
+                    rows.append(
+                        {
+                            "record_type": "quote",
+                            "schema_version": SCHEMA_VERSION,
+                            "poll_id": poll_id,
+                            "sportsbook": "bovada",
+                            "fetched_at": fetched_at,
+                            "source_update_at": iso_from_epoch_ms(event.get("lastModified")),
+                            "game": event.get("description"),
+                            "event_id": str(event.get("id")),
+                            "scheduled_start": iso_from_epoch_ms(event.get("startTime")),
+                            "event_status": event.get("status"),
+                            "is_live": bool(event.get("live")),
+                            "away_team": away.get("name"),
+                            "away_team_id": str(away.get("id")) if away.get("id") else None,
+                            "home_team": home.get("name"),
+                            "home_team_id": str(home.get("id")) if home.get("id") else None,
+                            "market_type": market_type,
+                            "prop_type": None,
+                            "market_id": str(market.get("id")),
+                            "away_line": parse_float(away_selection.get("price", {}).get("handicap")),
+                            "home_line": parse_float(home_selection.get("price", {}).get("handicap")),
+                            "away_odds": parse_american(away_selection.get("price", {}).get("american")),
+                            "home_odds": parse_american(home_selection.get("price", {}).get("american")),
+                            "away_selection_id": str(away_selection.get("id"))
+                            if away_selection.get("id")
+                            else None,
+                            "home_selection_id": str(home_selection.get("id"))
+                            if home_selection.get("id")
+                            else None,
+                        }
+                    )
+                    continue
                 base = description.split(" - ", 1)[0].strip()
                 prop_type = BOVADA_PROPS.get(base)
                 if not prop_type:
@@ -249,6 +346,7 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                             if reference.get("competitorId")
                             else None,
                             "player_team": player_team,
+                            "market_type": prop_type,
                             "prop_type": prop_type,
                             "market_id": str(market.get("id")),
                             "threshold": threshold,

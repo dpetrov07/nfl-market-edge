@@ -1,5 +1,7 @@
 requests>=2.32
 curl_cffi>=0.16
+cryptography>=46.0
+websockets>=15.0
 pandas>=2.2
 pyarrow>=17.0
 nflreadpy>=0.1.5

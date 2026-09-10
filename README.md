@@ -78,10 +78,10 @@ python scripts/join_sportsbook_sample.py
 ## Live sportsbook player props
 
 The lightweight collector polls DraftKings and Bovada receiving yards, rushing
-yards, and receptions. It appends every offered threshold and its Over/Under
-American odds to a daily JSONL file, along with one source-health record per
-poll. A temporary source error or an empty in-game feed is recorded and retried
-on the next cycle.
+yards, receptions, and each game's main moneyline/spread. It appends every
+offered player threshold and the current full-game lines to a daily JSONL file,
+along with one source-health record per poll. A temporary source error or an
+empty in-game feed is recorded and retried on the next cycle.
 
 ```bash
 python scripts/collect_live_sportsbook_props.py \
@@ -97,9 +97,31 @@ SPORTSBOOK_OUTPUT_DIR=/data
 SPORTSBOOK_POLL_SECONDS=30
 ```
 
-`railway.toml` supplies the worker start command. These public sportsbook feeds
-do not require API credentials, but they may remove or suspend player props
-during a game.
+Use `python scripts/collect_live_sportsbook_props.py` as that Railway service's
+start command. These public sportsbook feeds do not require API credentials,
+but they may remove or suspend player props during a game.
+
+## Live Kalshi WebSocket
+
+The Kalshi collector discovers one game's active receiving/rushing thresholds
+plus its game moneyline and spread ladders,
+subscribes to `ticker`, `orderbook_delta`, and public `trade`, and appends the
+unmodified messages plus local receive times to JSONL. It reconnects and
+resubscribes automatically.
+
+```bash
+KALSHI_API_KEY_ID=... \
+KALSHI_PRIVATE_KEY=/absolute/path/to/kalshi-private-key.pem \
+python scripts/collect_live_kalshi_ws.py --game SF_LAR --date 2026-09-10
+```
+
+For a separate Railway worker, use
+`python scripts/collect_live_kalshi_ws.py` as the start command, attach a volume
+at `/data`, and set `KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY`, `KALSHI_GAME`,
+`KALSHI_GAME_DATE`, and `KALSHI_OUTPUT_DIR=/data/kalshi_live`. The PEM value may
+contain real newlines or escaped `\\n` characters. Each Railway service needs
+its own start command, so the shared `railway.toml` contains only build/restart
+settings.
 
 Install the small Python dependency set from `requirements.txt`. The completed
 canonical dataset does not need to be rebuilt for normal inspection.
