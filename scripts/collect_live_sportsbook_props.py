@@ -1,4 +1,4 @@
-"""Continuously save current NFL player-prop odds from DraftKings and Bovada."""
+"""Continuously save current NFL player-prop odds from Bovada."""
 
 from __future__ import annotations
 
@@ -15,20 +15,6 @@ from pathlib import Path
 from curl_cffi import requests
 
 
-DK_LEAGUE_ID = 88808
-DK_URL = (
-    "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1/"
-    "leagues/{league}/categories/{category}/subcategories/{subcategory}"
-)
-DK_GAME_URL = (
-    "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusnj/v1/"
-    "leagues/88808/categories/492/subcategories/4518"
-)
-DK_PROPS = {
-    "receiving_yards": (1342, 14114),
-    "rushing_yards": (1001, 9514),
-    "receptions": (1342, 14115),
-}
 BOVADA_URL = (
     "https://www.bovada.lv/services/sports/event/coupon/events/A/description/"
     "football/nfl?lang=en"
@@ -80,155 +66,6 @@ def iso_from_epoch_ms(value) -> str | None:
         return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).isoformat()
     except (TypeError, ValueError, OSError):
         return None
-
-
-def split_teams(event: dict) -> tuple[dict, dict]:
-    home, away = {}, {}
-    for team in event.get("participants", []):
-        if team.get("type") != "Team":
-            continue
-        if team.get("venueRole") == "Home":
-            home = team
-        elif team.get("venueRole") == "Away":
-            away = team
-    if not home and " @ " in event.get("name", ""):
-        away_name, home_name = event["name"].split(" @ ", 1)
-        away, home = {"name": away_name}, {"name": home_name}
-    return away, home
-
-
-def selection_player(selection: dict) -> dict:
-    return next(
-        (p for p in selection.get("participants", []) if p.get("type") == "Player"),
-        {},
-    )
-
-
-def fetch_draftkings(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
-    rows, errors = [], []
-    for prop_type, (category, subcategory) in DK_PROPS.items():
-        fetched_at = utc_now()
-        url = DK_URL.format(
-            league=DK_LEAGUE_ID, category=category, subcategory=subcategory
-        )
-        try:
-            response = requests.get(url, impersonate="chrome120", timeout=15)
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:
-            errors.append(f"{prop_type}: {type(exc).__name__}: {exc}")
-            continue
-
-        events = {str(e["id"]): e for e in payload.get("events", [])}
-        selections: dict[str, list[dict]] = {}
-        for selection in payload.get("selections", []):
-            selections.setdefault(str(selection.get("marketId")), []).append(selection)
-
-        for market in payload.get("markets", []):
-            event = events.get(str(market.get("eventId")))
-            if not event or not game_matches(event.get("name", ""), game):
-                continue
-            away, home = split_teams(event)
-            by_threshold: dict[float, dict[str, dict]] = {}
-            for selection in selections.get(str(market.get("id")), []):
-                side = str(selection.get("outcomeType") or selection.get("label", "")).lower()
-                if "over" in side:
-                    side = "over"
-                elif "under" in side:
-                    side = "under"
-                else:
-                    continue
-                threshold = parse_float(selection.get("points"))
-                if threshold is not None:
-                    by_threshold.setdefault(threshold, {})[side] = selection
-
-            for threshold, sides in by_threshold.items():
-                over, under = sides.get("over", {}), sides.get("under", {})
-                reference = over or under
-                player = selection_player(reference)
-                rows.append(
-                    {
-                        "record_type": "quote",
-                        "schema_version": SCHEMA_VERSION,
-                        "poll_id": poll_id,
-                        "sportsbook": "draftkings",
-                        "fetched_at": fetched_at,
-                        "source_update_at": None,
-                        "game": event.get("name"),
-                        "event_id": str(event.get("id")),
-                        "scheduled_start": event.get("startEventDate"),
-                        "event_status": event.get("status"),
-                        "is_live": str(event.get("status", "")).upper()
-                        in {"STARTED", "LIVE", "IN_PROGRESS"},
-                        "away_team": away.get("name"),
-                        "away_team_id": str(away.get("id")) if away.get("id") else None,
-                        "home_team": home.get("name"),
-                        "home_team_id": str(home.get("id")) if home.get("id") else None,
-                        "player": player.get("name") or market.get("name"),
-                        "player_id": str(player.get("id")) if player.get("id") else None,
-                        "player_team": player.get("metadata", {}).get("teamAbbreviation"),
-                        "market_type": prop_type,
-                        "prop_type": prop_type,
-                        "market_id": str(market.get("id")),
-                        "threshold": threshold,
-                        "over_odds": parse_american(over.get("displayOdds", {}).get("american")),
-                        "under_odds": parse_american(under.get("displayOdds", {}).get("american")),
-                        "over_selection_id": str(over.get("id")) if over.get("id") else None,
-                        "under_selection_id": str(under.get("id")) if under.get("id") else None,
-                    }
-                )
-    fetched_at = utc_now()
-    try:
-        response = requests.get(DK_GAME_URL, impersonate="chrome120", timeout=15)
-        response.raise_for_status()
-        payload = response.json()
-        events = {str(e["id"]): e for e in payload.get("events", [])}
-        selections = {}
-        for selection in payload.get("selections", []):
-            selections.setdefault(str(selection.get("marketId")), []).append(selection)
-        for market in payload.get("markets", []):
-            market_type = {"Moneyline": "moneyline", "Spread": "spread"}.get(market.get("name"))
-            event = events.get(str(market.get("eventId")))
-            if not market_type or not event or not game_matches(event.get("name", ""), game):
-                continue
-            away, home = split_teams(event)
-            sides = {
-                str(selection.get("outcomeType", "")).lower(): selection
-                for selection in selections.get(str(market.get("id")), [])
-            }
-            away_selection, home_selection = sides.get("away", {}), sides.get("home", {})
-            rows.append(
-                {
-                    "record_type": "quote",
-                    "schema_version": SCHEMA_VERSION,
-                    "poll_id": poll_id,
-                    "sportsbook": "draftkings",
-                    "fetched_at": fetched_at,
-                    "source_update_at": None,
-                    "game": event.get("name"),
-                    "event_id": str(event.get("id")),
-                    "scheduled_start": event.get("startEventDate"),
-                    "event_status": event.get("status"),
-                    "is_live": str(event.get("status", "")).upper()
-                    in {"STARTED", "LIVE", "IN_PROGRESS"},
-                    "away_team": away.get("name"),
-                    "away_team_id": str(away.get("id")) if away.get("id") else None,
-                    "home_team": home.get("name"),
-                    "home_team_id": str(home.get("id")) if home.get("id") else None,
-                    "market_type": market_type,
-                    "prop_type": None,
-                    "market_id": str(market.get("id")),
-                    "away_line": parse_float(away_selection.get("points")),
-                    "home_line": parse_float(home_selection.get("points")),
-                    "away_odds": parse_american(away_selection.get("displayOdds", {}).get("american")),
-                    "home_odds": parse_american(home_selection.get("displayOdds", {}).get("american")),
-                    "away_selection_id": str(away_selection.get("id")) if away_selection.get("id") else None,
-                    "home_selection_id": str(home_selection.get("id")) if home_selection.get("id") else None,
-                }
-            )
-    except Exception as exc:
-        errors.append(f"game_lines: {type(exc).__name__}: {exc}")
-    return rows, errors
 
 
 def bovada_teams(event: dict) -> tuple[dict, dict]:
@@ -397,8 +234,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--game", default=os.getenv("SPORTSBOOK_GAME"), help="Example: SF 49ers @ LA Rams")
     parser.add_argument(
         "--books",
-        default=os.getenv("SPORTSBOOK_BOOKS", "draftkings,bovada"),
-        help="Comma-separated: draftkings,bovada",
+        default=os.getenv("SPORTSBOOK_BOOKS", "bovada"),
+        help="Comma-separated sportsbook list (currently: bovada)",
     )
     parser.add_argument(
         "--interval",
@@ -413,7 +250,7 @@ def parse_args() -> argparse.Namespace:
     if not args.game:
         parser.error("set --game or SPORTSBOOK_GAME")
     args.books = [book.strip().lower() for book in args.books.split(",") if book.strip()]
-    unknown = set(args.books) - {"draftkings", "bovada"}
+    unknown = set(args.books) - {"bovada"}
     if unknown:
         parser.error(f"unsupported books: {', '.join(sorted(unknown))}")
     return args
@@ -428,7 +265,7 @@ def main() -> None:
     args = parse_args()
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    fetchers = {"draftkings": fetch_draftkings, "bovada": fetch_bovada}
+    fetchers = {"bovada": fetch_bovada}
     print(
         f"Collecting {args.game!r} from {', '.join(args.books)} every {args.interval:g}s "
         f"into {args.output_dir}",
@@ -449,6 +286,8 @@ def main() -> None:
             records.append(source_record(poll_id, book, poll_started_at, rows, errors))
             status = records[-1]["status"]
             print(f"{records[-1]['fetched_at']} {book}: {len(rows)} quotes ({status})", flush=True)
+            for error in errors:
+                print(f"  {book} error: {error}", flush=True)
         path = append_records(args.output_dir, records)
         print(f"saved {len(records)} records -> {path}", flush=True)
         poll_number += 1

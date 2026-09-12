@@ -77,7 +77,7 @@ python scripts/join_sportsbook_sample.py
 
 ## Live sportsbook player props
 
-The lightweight collector polls DraftKings and Bovada receiving yards, rushing
+The lightweight collector polls Bovada receiving yards, rushing
 yards, receptions, and each game's main moneyline/spread. It appends every
 offered player threshold and the current full-game lines to a daily JSONL file,
 along with one source-health record per poll. A temporary source error or an
@@ -94,7 +94,7 @@ volume at `/data` and set:
 
 ```text
 SPORTSBOOK_GAME=SF 49ers @ LA Rams
-SPORTSBOOK_BOOKS=draftkings,bovada
+SPORTSBOOK_BOOKS=bovada
 SPORTSBOOK_POLL_SECONDS=30
 SPORTSBOOK_OUTPUT_DIR=/data/sportsbook_live
 ```
@@ -130,7 +130,9 @@ KALSHI_CHANNELS=ticker,orderbook_delta,trade
 KALSHI_OUTPUT_DIR=/data/kalshi_live
 ```
 
-The PEM value may contain real newlines or escaped `\\n` characters. The two
+`KALSHI_PRIVATE_KEY` accepts a normal multiline PEM or a single-line PEM with
+literal `\\n` characters. As a Railway-friendly alternative, omit it and set
+`KALSHI_PRIVATE_KEY_B64` to the base64-encoded PEM. The two
 services are independent: each has its own process, variables, and `/data`
 volume. The shared `railway.toml` intentionally contains no start command, so
 each service uses the command configured in its Railway settings.
