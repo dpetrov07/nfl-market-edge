@@ -1,4 +1,4 @@
-"""Record raw Kalshi WebSocket data for one NFL receiving/rushing game."""
+"""Record compact, latency-safe Kalshi data for one NFL game."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ SERIES = {
     "KXNFLGAME": "moneyline",
     "KXNFLSPREAD": "spread",
 }
-CHANNELS = ("ticker", "orderbook_delta", "trade")
+CHANNELS = ("ticker", "orderbook_delta", "trade", "market_lifecycle_v2")
 ET = ZoneInfo("America/New_York")
 TEAM_CODES = sorted(
     {
@@ -60,7 +60,7 @@ def load_local_env(path: Path = Path(".env")) -> None:
         "KALSHI_API_KEY_ID", "KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PEM",
         "KALSHI_PRIVATE_KEY_B64",
         "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME", "KALSHI_GAME_DATE",
-        "KALSHI_OUTPUT_DIR", "KALSHI_CHANNELS",
+        "KALSHI_OUTPUT_DIR", "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS",
     )
     for key in keys:
         if key in os.environ:
@@ -208,39 +208,198 @@ class JsonlWriter:
         self.handle.close()
 
 
-def websocket_record(raw_text: str, connection_id: str) -> dict:
-    received_at = utc_now()
+def number(value, cents: bool = False) -> float | None:
     try:
-        raw = json.loads(raw_text)
-    except (json.JSONDecodeError, TypeError) as exc:
+        parsed = float(value)
+        return parsed / 100 if cents else parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def dollar_value(msg: dict, dollars_key: str, cents_key: str) -> float | None:
+    value = number(msg.get(dollars_key))
+    return value if value is not None else number(msg.get(cents_key), cents=True)
+
+
+class MarketState:
+    """Maintain full books in memory and return only compact records worth saving."""
+
+    def __init__(self, tickers: list[str]):
+        self.tickers = set(tickers)
+        # With use_yes_price=true, yes levels are bids and no levels are YES asks.
+        self.books = {ticker: {"yes": {}, "no": {}} for ticker in tickers}
+        self.initialized: set[str] = set()
+        self.last_top: dict[str, tuple] = {}
+        self.last_status: dict[str, str] = {}
+        self.ticker_stats: dict[str, dict] = {}
+
+    @staticmethod
+    def _levels(msg: dict, side: str) -> dict[float, float]:
+        values = msg.get(f"{side}_dollars_fp") or msg.get(f"{side}_dollars")
+        cents = False
+        if values is None:
+            values, cents = msg.get(side, []), True
+        levels = {}
+        for price, size in values or []:
+            parsed_price, parsed_size = number(price, cents=cents), number(size)
+            if parsed_price is not None and parsed_size and parsed_size > 0:
+                levels[parsed_price] = parsed_size
+        return levels
+
+    def _top_values(self, ticker: str) -> dict:
+        book = self.books[ticker]
+        yes_bid = max(book["yes"], default=None)
+        yes_ask = min(book["no"], default=None)
         return {
-            "record_type": "malformed_ws_message",
-            "received_at": received_at,
-            "connection_id": connection_id,
-            "error": str(exc),
-            "raw_text": raw_text,
+            "yes_bid_dollars": yes_bid,
+            "yes_bid_size": book["yes"].get(yes_bid),
+            "yes_ask_dollars": yes_ask,
+            "yes_ask_size": book["no"].get(yes_ask),
+            "no_bid_dollars": round(1 - yes_ask, 10) if yes_ask is not None else None,
+            "no_bid_size": book["no"].get(yes_ask),
+            "no_ask_dollars": round(1 - yes_bid, 10) if yes_bid is not None else None,
+            "no_ask_size": book["yes"].get(yes_bid),
+            "spread_dollars": round(yes_ask - yes_bid, 10)
+            if yes_bid is not None and yes_ask is not None else None,
         }
-    msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
-    return {
-        "record_type": "ws_message",
-        "received_at": received_at,
-        "connection_id": connection_id,
-        "message_type": raw.get("type"),
-        "market_ticker": msg.get("market_ticker") or msg.get("ticker"),
-        "exchange_timestamp": msg.get("time") or msg.get("ts"),
-        "exchange_ts_ms": msg.get("ts_ms"),
-        "sid": raw.get("sid") or msg.get("sid"),
-        "seq": raw.get("seq"),
-        "raw": raw,
-    }
+
+    def _top_record(self, ticker: str, received_at: str, raw: dict, reason: str) -> dict | None:
+        top = self._top_values(ticker)
+        signature = tuple(top.values())
+        previous = self.last_top.get(ticker)
+        if previous == signature:
+            return None
+        names = tuple(top)
+        changed = list(names) if previous is None else [
+            name for name, old, new in zip(names, previous, signature) if old != new
+        ]
+        self.last_top[ticker] = signature
+        msg = raw.get("msg", {})
+        return {
+            "record_type": "top_of_book",
+            "received_at": received_at,
+            "market_ticker": ticker,
+            "exchange_timestamp": msg.get("time") or msg.get("ts"),
+            "exchange_ts_ms": msg.get("ts_ms"),
+            "sid": raw.get("sid"),
+            "seq": raw.get("seq"),
+            "reason": reason,
+            "changed_fields": changed,
+            **top,
+        }
+
+    def process(self, raw: dict, received_at: str) -> list[dict]:
+        message_type = raw.get("type")
+        msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
+        ticker = msg.get("market_ticker") or msg.get("ticker")
+        common = {
+            "received_at": received_at,
+            "market_ticker": ticker,
+            "exchange_timestamp": msg.get("time") or msg.get("ts"),
+            "exchange_ts_ms": msg.get("ts_ms"),
+            "sid": raw.get("sid"),
+            "seq": raw.get("seq"),
+        }
+
+        if message_type == "orderbook_snapshot" and ticker in self.tickers:
+            self.books[ticker] = {
+                "yes": self._levels(msg, "yes"),
+                "no": self._levels(msg, "no"),
+            }
+            self.initialized.add(ticker)
+            record = self._top_record(ticker, received_at, raw, "snapshot")
+            return [record] if record else []
+
+        if message_type == "orderbook_delta" and ticker in self.tickers:
+            side = msg.get("side")
+            price = dollar_value(msg, "price_dollars", "price")
+            delta = number(msg.get("delta_fp"))
+            if delta is None:
+                delta = number(msg.get("delta"))
+            if side in {"yes", "no"} and price is not None and delta is not None:
+                levels = self.books[ticker][side]
+                size = round(levels.get(price, 0) + delta, 10)
+                if size > 0:
+                    levels[price] = size
+                else:
+                    levels.pop(price, None)
+                if ticker in self.initialized:
+                    record = self._top_record(ticker, received_at, raw, "orderbook_delta")
+                    return [record] if record else []
+            return []
+
+        if message_type == "trade" and ticker in self.tickers:
+            count = msg.get("count_fp") if msg.get("count_fp") is not None else msg.get("count")
+            return [{
+                "record_type": "trade",
+                **common,
+                "trade_id": msg.get("trade_id"),
+                "yes_price_dollars": dollar_value(msg, "yes_price_dollars", "yes_price"),
+                "no_price_dollars": dollar_value(msg, "no_price_dollars", "no_price"),
+                "count": number(count),
+                "taker_outcome_side": msg.get("taker_outcome_side") or msg.get("taker_side"),
+                "taker_book_side": msg.get("taker_book_side"),
+                "is_block_trade": msg.get("is_block_trade", False),
+            }]
+
+        if message_type == "ticker" and ticker in self.tickers:
+            volume = msg.get("volume_fp") if msg.get("volume_fp") is not None else msg.get("volume")
+            interest = (
+                msg.get("open_interest_fp") if msg.get("open_interest_fp") is not None
+                else msg.get("open_interest")
+            )
+            self.ticker_stats[ticker] = {
+                "last_price_dollars": dollar_value(msg, "price_dollars", "price"),
+                "volume": number(volume),
+                "open_interest": number(interest),
+            }
+            status = msg.get("status") or msg.get("market_status")
+            if status and self.last_status.get(ticker) != status:
+                self.last_status[ticker] = status
+                return [{"record_type": "market_status", **common, "status": status}]
+            return []
+
+        if message_type == "market_lifecycle_v2" and ticker in self.tickers:
+            event_type = msg.get("event_type")
+            if event_type:
+                self.last_status[ticker] = event_type
+            return [{
+                "record_type": "market_status",
+                **common,
+                "status": event_type,
+                "result": msg.get("result"),
+                "open_ts": msg.get("open_ts"),
+                "close_ts": msg.get("close_ts"),
+                "determination_ts": msg.get("determination_ts"),
+                "settled_ts": msg.get("settled_ts") or msg.get("settlement_ts"),
+                "settlement_value_dollars": msg.get("settlement_value"),
+            }]
+
+        if message_type in {"subscribed", "error"}:
+            return [{
+                "record_type": "websocket_control",
+                "received_at": received_at,
+                "message_type": message_type,
+                "id": raw.get("id"),
+                "sid": raw.get("sid") or msg.get("sid"),
+                "channel": msg.get("channel"),
+                "code": msg.get("code"),
+                "message": msg.get("msg"),
+            }]
+        return []
 
 
 async def subscribe(ws, tickers: list[str], channels: list[str], writer: JsonlWriter) -> None:
     for command_id, channel in enumerate(channels, start=1):
+        params = {"channels": [channel]}
+        if channel != "market_lifecycle_v2":
+            params["market_tickers"] = tickers
+        if channel == "orderbook_delta":
+            params["use_yes_price"] = True
         command = {
             "id": command_id,
             "cmd": "subscribe",
-            "params": {"channels": [channel], "market_tickers": tickers},
+            "params": params,
         }
         await ws.send(json.dumps(command))
         writer.status("subscription_sent", channel=channel, market_count=len(tickers))
@@ -276,16 +435,49 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                 await subscribe(ws, tickers, args.channels, writer)
                 backoff = 1
                 last_sequence = {}
+                state = MarketState(tickers)
+                connected_at = time.monotonic()
+                last_heartbeat = 0.0
+                last_message_at = None
+                message_count = 0
                 while not STOP:
                     if args.duration and time.monotonic() - started >= args.duration:
                         writer.status("stopped", reason="duration_reached")
                         return
+                    now = time.monotonic()
+                    if now - last_heartbeat >= args.heartbeat_seconds:
+                        writer.write({
+                            "record_type": "heartbeat",
+                            "received_at": utc_now(),
+                            "connection_id": connection_id,
+                            "connected_seconds": round(now - connected_at, 3),
+                            "market_count": len(tickers),
+                            "books_initialized": len(state.initialized),
+                            "ticker_markets_seen": len(state.ticker_stats),
+                            "messages_received": message_count,
+                            "last_message_at": last_message_at,
+                        })
+                        last_heartbeat = now
                     try:
                         raw_text = await asyncio.wait_for(ws.recv(), timeout=1)
                     except asyncio.TimeoutError:
                         continue
-                    record = websocket_record(raw_text, connection_id)
-                    sid, seq = record.get("sid"), record.get("seq")
+                    received_at = utc_now()
+                    last_message_at = received_at
+                    message_count += 1
+                    try:
+                        raw = json.loads(raw_text)
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        writer.write({
+                            "record_type": "malformed_ws_message",
+                            "received_at": received_at,
+                            "connection_id": connection_id,
+                            "error": str(exc),
+                            "raw_text": raw_text,
+                        })
+                        continue
+                    msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
+                    sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
                     if isinstance(sid, int) and isinstance(seq, int):
                         previous = last_sequence.get(sid)
                         if previous is not None and seq != previous + 1:
@@ -295,12 +487,17 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                                 sid=sid,
                                 expected_seq=previous + 1,
                                 received_seq=seq,
-                                market_ticker=record.get("market_ticker"),
+                                market_ticker=msg.get("market_ticker") or msg.get("ticker"),
+                            )
+                            raise RuntimeError(
+                                f"sequence gap on sid {sid}; reconnecting for fresh snapshots"
                             )
                         last_sequence[sid] = seq
-                    writer.write(record)
-                    if record.get("message_type") in {"subscribed", "error"}:
-                        print(json.dumps(record["raw"]), flush=True)
+                    for record in state.process(raw, received_at):
+                        record["connection_id"] = connection_id
+                        writer.write(record)
+                    if raw.get("type") in {"subscribed", "error"}:
+                        print(json.dumps(raw), flush=True)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -337,11 +534,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--list-only", action="store_true", help="Discover markets without connecting")
     parser.add_argument("--duration", type=float, help="Stop after N seconds; omit to run continuously")
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=float(os.getenv("KALSHI_HEARTBEAT_SECONDS", "5")),
+    )
     args = parser.parse_args()
     args.channels = [item.strip() for item in args.channels.split(",") if item.strip()]
     unknown = set(args.channels) - set(CHANNELS)
     if unknown:
         parser.error(f"unsupported channels: {', '.join(sorted(unknown))}")
+    if "market_lifecycle_v2" not in args.channels:
+        args.channels.append("market_lifecycle_v2")
     return args
 
 
@@ -365,6 +569,13 @@ def main() -> None:
         return
 
     writer = JsonlWriter(args.output_dir, args.game)
+    compact_markets = [{
+        key: market.get(key) for key in (
+            "ticker", "market_id", "event_ticker", "game", "market_kind", "prop_type",
+            "player", "player_id", "threshold", "outcome_team", "title", "yes_sub_title",
+            "status", "open_time", "close_time",
+        )
+    } for market in markets]
     writer.write(
         {
             "record_type": "market_discovery",
@@ -372,10 +583,10 @@ def main() -> None:
             "game": args.game,
             "game_date": args.date,
             "channels": args.channels,
-            "markets": markets,
+            "markets": compact_markets,
         }
     )
-    print(f"Saving raw events to {writer.path}", flush=True)
+    print(f"Saving compact market events to {writer.path}", flush=True)
     try:
         asyncio.run(collect(args, markets, writer))
     finally:
