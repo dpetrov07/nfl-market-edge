@@ -155,6 +155,19 @@ def discover_markets(game: str, date_text: str) -> list[dict]:
             cursor = payload.get("cursor")
             if not cursor:
                 break
+    spreads = sorted(
+        (market for market in found if market["prop_type"] == "spread"),
+        key=lambda market: (
+            abs(
+                (
+                    float(market.get("yes_bid_dollars") or 0)
+                    + float(market.get("yes_ask_dollars") or 0)
+                ) / 2 - 0.5
+            ),
+            market["ticker"],
+        ),
+    )[:5]
+    found = [market for market in found if market["prop_type"] != "spread"] + spreads
     return sorted(found, key=lambda row: row["ticker"])
 
 

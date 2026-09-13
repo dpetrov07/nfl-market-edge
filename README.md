@@ -124,8 +124,8 @@ descriptions. Leave it unset to collect every NFL game on the date.
 
 ## Live Kalshi WebSocket
 
-The Kalshi collector discovers each game's active receiving/rushing thresholds
-plus its game moneyline and spread ladders,
+The Kalshi collector discovers each game's active receiving/rushing thresholds,
+both game moneylines, and five spreads nearest the current line,
 subscribes to `ticker`, `orderbook_delta`, public `trade`, and market lifecycle.
 It keeps full books in memory and writes only material top-of-book changes,
 trades, status/reconnect/gap events, and a compact five-second heartbeat to
