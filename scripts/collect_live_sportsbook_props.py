@@ -23,6 +23,9 @@ BOVADA_PROPS = {
     "Total Receiving Yards": "receiving_yards",
     "Total Rushing Yards": "rushing_yards",
     "Total Receptions": "receptions",
+    "Alternate Receiving Yards": "receiving_yards",
+    "Alternate Rushing Yards": "rushing_yards",
+    "Alternate Receptions": "receptions",
 }
 SCHEMA_VERSION = 1
 STOP = False
@@ -78,6 +81,69 @@ def bovada_teams(event: dict) -> tuple[dict, dict]:
     return away, home
 
 
+def bovada_prop_markets(event: dict, include_inactive: bool = False) -> list[dict]:
+    """Flatten Bovada's player-prop markets without losing alternate lines."""
+    found = []
+    for group in event.get("displayGroups", []):
+        for market in group.get("markets", []):
+            if not include_inactive and market.get("status") != "O":
+                continue
+            description = market.get("description", "")
+            base = description.split(" - ", 1)[0].strip()
+            prop_type = BOVADA_PROPS.get(base)
+            if not prop_type:
+                continue
+            is_alternate = base.startswith("Alternate ")
+            player_text = description.split(" - ", 1)[-1].strip()
+            team_match = re.search(r"\s+\(([^)]+)\)\s*$", player_text)
+            outcomes = []
+            for outcome in market.get("outcomes", []):
+                if not include_inactive and outcome.get("status") != "O":
+                    continue
+                side = str(outcome.get("type") or outcome.get("description", "")).lower()
+                if side in {"o", "over"} or "over" in side:
+                    side = "over"
+                elif side in {"u", "under"} or "under" in side:
+                    side = "under"
+                elif is_alternate:
+                    side = "over"
+                else:
+                    continue
+                threshold = parse_float(outcome.get("price", {}).get("handicap"))
+                if threshold is None and is_alternate:
+                    match = re.match(r"\s*(\d+(?:\.\d+)?)\+", outcome.get("description", ""))
+                    if match:
+                        threshold = float(match.group(1)) - 0.5
+                if threshold is None:
+                    continue
+                outcomes.append(
+                    {
+                        "side": side,
+                        "threshold": threshold,
+                        "selection_id": str(outcome.get("id")),
+                        "selection_status": outcome.get("status"),
+                        "player_id": str(outcome.get("competitorId"))
+                        if outcome.get("competitorId")
+                        else None,
+                        "american_odds": parse_american(outcome.get("price", {}).get("american")),
+                        "decimal_odds": parse_float(outcome.get("price", {}).get("decimal")),
+                    }
+                )
+            found.append(
+                {
+                    "market_id": str(market.get("id")),
+                    "market_status": market.get("status"),
+                    "market_description": description,
+                    "prop_type": prop_type,
+                    "is_alternate": is_alternate,
+                    "player": re.sub(r"\s+\([^)]+\)\s*$", "", player_text).strip(),
+                    "player_team": team_match.group(1) if team_match else None,
+                    "outcomes": outcomes,
+                }
+            )
+    return found
+
+
 def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
     fetched_at = utc_now()
     response = requests.get(BOVADA_URL, impersonate="chrome120", timeout=15)
@@ -89,6 +155,9 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
         if not game_matches(event.get("description", ""), game):
             continue
         away, home = bovada_teams(event)
+        prop_markets = {
+            item["market_id"]: item for item in bovada_prop_markets(event)
+        }
         for group in event.get("displayGroups", []):
             for market in group.get("markets", []):
                 if market.get("status") != "O":
@@ -135,28 +204,14 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                         }
                     )
                     continue
-                base = description.split(" - ", 1)[0].strip()
-                prop_type = BOVADA_PROPS.get(base)
-                if not prop_type:
+                prop_market = prop_markets.get(str(market.get("id")))
+                if not prop_market:
                     continue
-                player_text = description.split(" - ", 1)[-1].strip()
-                team_match = re.search(r"\s+\(([^)]+)\)\s*$", player_text)
-                player_team = team_match.group(1) if team_match else None
-                player = re.sub(r"\s+\([^)]+\)\s*$", "", player_text).strip()
                 by_threshold: dict[float, dict[str, dict]] = {}
-                for outcome in market.get("outcomes", []):
-                    if outcome.get("status") != "O":
-                        continue
-                    side = str(outcome.get("type") or outcome.get("description", "")).lower()
-                    if side in {"o", "over"} or "over" in side:
-                        side = "over"
-                    elif side in {"u", "under"} or "under" in side:
-                        side = "under"
-                    else:
-                        continue
-                    threshold = parse_float(outcome.get("price", {}).get("handicap"))
-                    if threshold is not None:
-                        by_threshold.setdefault(threshold, {})[side] = outcome
+                for outcome in prop_market["outcomes"]:
+                    by_threshold.setdefault(outcome["threshold"], {})[
+                        outcome["side"]
+                    ] = outcome
 
                 for threshold, sides in by_threshold.items():
                     over, under = sides.get("over", {}), sides.get("under", {})
@@ -178,19 +233,17 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
                             "away_team_id": str(away.get("id")) if away.get("id") else None,
                             "home_team": home.get("name"),
                             "home_team_id": str(home.get("id")) if home.get("id") else None,
-                            "player": player,
-                            "player_id": str(reference.get("competitorId"))
-                            if reference.get("competitorId")
-                            else None,
-                            "player_team": player_team,
-                            "market_type": prop_type,
-                            "prop_type": prop_type,
+                            "player": prop_market["player"],
+                            "player_id": reference.get("player_id"),
+                            "player_team": prop_market["player_team"],
+                            "market_type": prop_market["prop_type"],
+                            "prop_type": prop_market["prop_type"],
                             "market_id": str(market.get("id")),
                             "threshold": threshold,
-                            "over_odds": parse_american(over.get("price", {}).get("american")),
-                            "under_odds": parse_american(under.get("price", {}).get("american")),
-                            "over_selection_id": str(over.get("id")) if over.get("id") else None,
-                            "under_selection_id": str(under.get("id")) if under.get("id") else None,
+                            "over_odds": over.get("american_odds"),
+                            "under_odds": under.get("american_odds"),
+                            "over_selection_id": over.get("selection_id"),
+                            "under_selection_id": under.get("selection_id"),
                         }
                     )
     return rows, []

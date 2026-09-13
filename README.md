@@ -103,6 +103,29 @@ Use `python scripts/collect_live_sportsbook_props.py` as that Railway service's
 start command. These public sportsbook feeds do not require API credentials,
 but they may remove or suspend player props during a game.
 
+### Local Bovada WebSocket collector
+
+The WebSocket collector uses the HTTP feed once to discover every main and
+alternate receiving-yards, rushing-yards, and receptions selection, then opens
+one independent Bovada subscription per game. It writes one compact
+`.jsonl.gz` file per game and records only the initial selection state and real
+odds, line, suspension/removal, or reappearance changes. `received_at` is the
+local UTC time captured immediately after each WebSocket receive completes.
+
+```bash
+# All NFL games on the given Sunday.
+python scripts/collect_live_bovada_ws.py --date 2026-09-13
+
+# A short local proof for one or more games.
+python scripts/collect_live_bovada_ws.py --date 2026-09-13 \
+  --game "Miami Dolphins @ Las Vegas Raiders" --run-seconds 120 --verbose
+```
+
+Alternate `50+` selections are stored as `line: 49.5`,
+`semantic_operator: "at_least"`, and `semantic_threshold: 50` so their event
+semantics are explicit for later Kalshi/NFL-live joins. This collector is
+local-only; it is not wired into either Railway service.
+
 ## Live Kalshi WebSocket
 
 The Kalshi collector discovers one game's active receiving/rushing thresholds
