@@ -7,6 +7,7 @@ import asyncio
 import gzip
 import json
 import math
+import os
 import re
 import signal
 import time
@@ -100,6 +101,7 @@ def selection_rows(event: dict) -> list[dict]:
                     "line": outcome["threshold"],
                     "semantic_operator": operator,
                     "semantic_threshold": threshold,
+                    "threshold": threshold,
                     "market_id": market["market_id"],
                     "selection_id": outcome["selection_id"],
                     "american_odds": outcome["american_odds"],
@@ -399,26 +401,54 @@ async def stream_game(collector: GameCollector, verbose: bool) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    today = datetime.now(ET).date().isoformat()
+    volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    default_output = os.getenv("BOVADA_OUTPUT_DIR") or (
+        str(Path(volume) / "bovada_live") if volume else "data/raw/bovada_live"
+    )
+    today = os.getenv("BOVADA_GAME_DATE", datetime.now(ET).date().isoformat())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", default=today, help="Sunday game date in America/New_York")
     parser.add_argument(
-        "--game", action="append", default=[], help="Optional game filter; repeat for multiple games"
+        "--game", action="append", help="Optional game filter; repeat for multiple games"
     )
-    parser.add_argument(
-        "--output-dir", type=Path, default=Path("data/raw/bovada_live")
-    )
+    parser.add_argument("--output-dir", type=Path, default=Path(default_output))
     parser.add_argument("--run-seconds", type=float, help="Stop after this many seconds")
     parser.add_argument("--verbose", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.game:
+        args.game = [
+            game.strip() for game in os.getenv("BOVADA_GAMES", "").split(",") if game.strip()
+        ]
+    return args
 
 
 async def async_main(args: argparse.Namespace) -> None:
-    events, received_at = fetch_sunday_events(args.date, args.game)
-    if not events:
-        raise SystemExit(f"No Bovada NFL player props found for {args.date}")
+    backoff = 1
+    while True:
+        try:
+            events, received_at = await asyncio.to_thread(
+                fetch_sunday_events, args.date, args.game
+            )
+            if events:
+                break
+            print(
+                f"No Bovada NFL player props found for {args.date}; "
+                f"retrying in {backoff}s",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"Bovada discovery error: {exc}; retrying in {backoff}s", flush=True)
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 30)
     session_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}-{uuid.uuid4().hex[:8]}"
-    collectors = [GameCollector(event, received_at, args.output_dir, session_id) for event in events]
+    collectors = []
+    for event in events:
+        try:
+            collectors.append(GameCollector(event, received_at, args.output_dir, session_id))
+        except Exception as exc:
+            print(f"{event.get('description')} setup failed: {exc}", flush=True)
+    if not collectors:
+        raise SystemExit("No Bovada game collectors could start")
     print(
         f"discovered {len(collectors)} game(s), {sum(len(c.selections) for c in collectors)} exact selections",
         flush=True,
@@ -428,7 +458,7 @@ async def async_main(args: argparse.Namespace) -> None:
         if args.run_seconds:
             await asyncio.sleep(args.run_seconds)
         else:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         for task in tasks:
             task.cancel()

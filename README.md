@@ -75,7 +75,7 @@ THE_ODDS_API_KEY=... python scripts/pull_sportsbook_history.py --include-alterna
 python scripts/join_sportsbook_sample.py
 ```
 
-## Live sportsbook player props
+## Legacy polled sportsbook player props
 
 The lightweight collector polls Bovada receiving yards, rushing
 yards, receptions, and each game's main moneyline/spread. It appends every
@@ -89,21 +89,7 @@ python scripts/collect_live_sportsbook_props.py \
   --interval 30
 ```
 
-For the Railway service named `sportsbook-collector`, attach its own persistent
-volume at `/data` and set:
-
-```text
-SPORTSBOOK_GAME=SF 49ers @ LA Rams
-SPORTSBOOK_BOOKS=bovada
-SPORTSBOOK_POLL_SECONDS=30
-SPORTSBOOK_OUTPUT_DIR=/data/sportsbook_live
-```
-
-Use `python scripts/collect_live_sportsbook_props.py` as that Railway service's
-start command. These public sportsbook feeds do not require API credentials,
-but they may remove or suspend player props during a game.
-
-### Local Bovada WebSocket collector
+## Live Bovada WebSocket
 
 The WebSocket collector uses the HTTP feed once to discover every main and
 alternate receiving-yards, rushing-yards, and receptions selection, then opens
@@ -123,12 +109,22 @@ python scripts/collect_live_bovada_ws.py --date 2026-09-13 \
 
 Alternate `50+` selections are stored as `line: 49.5`,
 `semantic_operator: "at_least"`, and `semantic_threshold: 50` so their event
-semantics are explicit for later Kalshi/NFL-live joins. This collector is
-local-only; it is not wired into either Railway service.
+semantics are explicit for later Kalshi/NFL-live joins.
+
+For Railway, attach a volume at `/data`, set the config-file path to
+`/railway.bovada.toml`, and set:
+
+```text
+BOVADA_GAME_DATE=2026-09-13
+BOVADA_OUTPUT_DIR=/data/bovada_live
+```
+
+`BOVADA_GAMES` may optionally contain comma-separated Bovada game
+descriptions. Leave it unset to collect every NFL game on the date.
 
 ## Live Kalshi WebSocket
 
-The Kalshi collector discovers one game's active receiving/rushing thresholds
+The Kalshi collector discovers each game's active receiving/rushing thresholds
 plus its game moneyline and spread ladders,
 subscribes to `ticker`, `orderbook_delta`, public `trade`, and market lifecycle.
 It keeps full books in memory and writes only material top-of-book changes,
@@ -139,18 +135,17 @@ per-game `.jsonl.gz` files. Same-price size changes are saved after accumulating
 ```bash
 KALSHI_API_KEY_ID=... \
 KALSHI_PRIVATE_KEY=/absolute/path/to/kalshi-private-key.pem \
-python scripts/collect_live_kalshi_ws.py --game SF_LAR --date 2026-09-10
+python scripts/collect_live_kalshi_ws.py --game SF_LAR --game BUF_HOU --date 2026-09-13
 ```
 
-For the separate Railway service named `kalshi-collector`, use
-`python scripts/collect_live_kalshi_ws.py` as the start command and attach a
-separate persistent volume at `/data`. Set:
+For Railway, attach a separate volume at `/data`, set the config-file path to
+`/railway.kalshi.toml`, and set:
 
 ```text
 KALSHI_API_KEY_ID=<your key id>
 KALSHI_PRIVATE_KEY=<the complete PEM private key>
-KALSHI_GAME=SF_LAR
-KALSHI_GAME_DATE=2026-09-10
+KALSHI_GAMES=SF_LAR,BUF_HOU
+KALSHI_GAME_DATE=2026-09-13
 KALSHI_CHANNELS=ticker,orderbook_delta,trade,market_lifecycle_v2
 KALSHI_HEARTBEAT_SECONDS=5
 KALSHI_TOP_SIZE_CHANGE=10
@@ -159,15 +154,7 @@ KALSHI_OUTPUT_DIR=/data/kalshi_live
 
 `KALSHI_PRIVATE_KEY` accepts a normal multiline PEM or a single-line PEM with
 literal `\\n` characters. As a Railway-friendly alternative, omit it and set
-`KALSHI_PRIVATE_KEY_B64` to the base64-encoded PEM. The two
-services are independent: each has its own process, variables, and `/data`
-volume. The shared `railway.toml` intentionally contains no start command, so
-each service uses the command configured in its Railway settings.
-
-To create both workers, connect the GitHub repository to a new Railway project
-twice. Name the services `sportsbook-collector` and `kalshi-collector`, set the
-respective start command and variables above, then add one volume to each
-service with mount path `/data`. No public domain or cron schedule is needed.
+`KALSHI_PRIVATE_KEY_B64` to the base64-encoded PEM.
 
 ## Live NFL play-by-play
 

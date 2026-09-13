@@ -105,9 +105,14 @@ def normalize_play(play: dict, game: dict) -> dict:
     team_id = ref_id(play.get("team")) or ref_id(start.get("team"))
     team_by_id = {game["away"]["id"]: game["away"]["abbreviation"],
                   game["home"]["id"]: game["home"]["abbreviation"]}
+    kickoff = datetime.fromisoformat(game["kickoff"].replace("Z", "+00:00"))
     return {
         "provider": "espn",
         "provider_event_id": game["event_id"],
+        "game": f"{game['away']['abbreviation']} @ {game['home']['abbreviation']}",
+        "game_date": kickoff.astimezone(ET).date().isoformat(),
+        "away_team": game["away"]["abbreviation"],
+        "home_team": game["home"]["abbreviation"],
         "provider_play_id": str(play.get("id")),
         "sequence_number": int(play.get("sequenceNumber") or 0),
         "provider_wallclock": play.get("wallclock"),
@@ -283,6 +288,8 @@ async def collect_game(game: dict, args: argparse.Namespace) -> None:
                     stats = player_stats(latest)
                     receiver_state = stats.get(play.get("receiver_id") or play.get("receiver"), {})
                     rusher_state = stats.get(play.get("rusher_id") or play.get("rusher"), {})
+                    is_receiving = bool(play.get("receiver_id") or play.get("receiver"))
+                    is_rushing = bool(play.get("rusher_id") or play.get("rusher"))
                     writer.write({
                         "record_type": "play_new" if revision == 1 else "play_correction",
                         "received_at": received_at,
@@ -294,6 +301,15 @@ async def collect_game(game: dict, args: argparse.Namespace) -> None:
                         "receiver_targets": receiver_state.get("targets"),
                         "rusher_rushing_yards": rusher_state.get("rushing_yards"),
                         "rusher_carries": rusher_state.get("carries"),
+                        "player_id": play.get("receiver_id") if is_receiving
+                        else play.get("rusher_id") if is_rushing else None,
+                        "player": play.get("receiver") if is_receiving
+                        else play.get("rusher") if is_rushing else None,
+                        "prop_type": "receiving_yards" if is_receiving
+                        else "rushing_yards" if is_rushing else None,
+                        "threshold": None,
+                        "stat_value": receiver_state.get("receiving_yards") if is_receiving
+                        else rusher_state.get("rushing_yards") if is_rushing else None,
                     })
                     writer.seen[play_id] = source_fingerprint
                     writer.revisions[play_id] = revision
@@ -307,6 +323,16 @@ async def collect_game(game: dict, args: argparse.Namespace) -> None:
                             "provider_event_id": game["event_id"],
                             "provider_play_id": missing_id,
                             "previous_sequence_number": old.get("sequence_number"),
+                            "game": old.get("game"),
+                            "game_date": old.get("game_date"),
+                            "away_team": old.get("away_team"),
+                            "home_team": old.get("home_team"),
+                            "player_id": old.get("receiver_id") or old.get("rusher_id"),
+                            "player": old.get("receiver") or old.get("rusher"),
+                            "prop_type": "receiving_yards" if old.get("receiver_id") or old.get("receiver")
+                            else "rushing_yards" if old.get("rusher_id") or old.get("rusher")
+                            else None,
+                            "threshold": None,
                         })
                         writer.seen.pop(missing_id, None)
                 polls += 1
@@ -360,7 +386,17 @@ def parse_args() -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
-    games = await asyncio.to_thread(discover_games, args.date)
+    backoff = 1
+    while not STOP:
+        try:
+            games = await asyncio.to_thread(discover_games, args.date)
+            break
+        except Exception as exc:
+            print(f"ESPN discovery error: {exc}; retrying in {backoff}s", flush=True)
+            await sleep_or_stop(backoff)
+            backoff = min(backoff * 2, 30)
+    else:
+        return
     wanted = {item.strip() for item in args.game_ids.split(",")} if args.game_ids else None
     if wanted:
         games = [game for game in games if game["event_id"] in wanted]
@@ -368,12 +404,27 @@ async def run(args: argparse.Namespace) -> None:
         raise SystemExit(f"No ESPN NFL games found for {args.date}")
     print(f"Discovered {len(games)} ESPN NFL games for {args.date}", flush=True)
     results = await asyncio.gather(
-        *(collect_game(game, args) for game in games),
+        *(supervise_game(game, args) for game in games),
         return_exceptions=True,
     )
     for game, result in zip(games, results):
         if isinstance(result, BaseException):
             print(f"{game['event_id']} collector stopped unexpectedly: {result}", flush=True)
+
+
+async def supervise_game(game: dict, args: argparse.Namespace) -> None:
+    backoff = 1
+    while not STOP:
+        try:
+            await collect_game(game, args)
+            return
+        except Exception as exc:
+            print(
+                f"{game['event_id']} collector error: {exc}; retrying in {backoff}s",
+                flush=True,
+            )
+            await sleep_or_stop(backoff)
+            backoff = min(backoff * 2, 30)
 
 
 def request_stop(_signum, _frame) -> None:

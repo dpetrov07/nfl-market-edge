@@ -1,4 +1,4 @@
-"""Record compact, latency-safe Kalshi data for one NFL game."""
+"""Record compact, latency-safe Kalshi data for independent NFL games."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def load_local_env(path: Path = Path(".env")) -> None:
     keys = (
         "KALSHI_API_KEY_ID", "KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PEM",
         "KALSHI_PRIVATE_KEY_B64",
-        "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME", "KALSHI_GAME_DATE",
+        "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME", "KALSHI_GAMES", "KALSHI_GAME_DATE",
         "KALSHI_OUTPUT_DIR", "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS",
         "KALSHI_TOP_SIZE_CHANGE",
     )
@@ -85,7 +85,7 @@ def load_local_env(path: Path = Path(".env")) -> None:
 def requested_pair(value: str) -> tuple[str, str]:
     parts = [part for part in re.split(r"[^A-Za-z]+", value.upper()) if part]
     if len(parts) != 2:
-        raise SystemExit("--game must use team abbreviations, for example SF_LAR")
+        raise ValueError("--game must use team abbreviations, for example SF_LAR")
     return tuple(ALIASES.get(part, part) for part in parts)
 
 
@@ -552,6 +552,9 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                         print(json.dumps(raw), flush=True)
         except asyncio.CancelledError:
             raise
+        except ValueError as exc:
+            print(f"{game} configuration error: {exc}", flush=True)
+            return
         except Exception as exc:
             writer.status(
                 "disconnected",
@@ -574,7 +577,7 @@ def parse_args() -> argparse.Namespace:
         str(Path(volume) / "kalshi_live") if volume else "data/raw/kalshi_live"
     )
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--game", default=os.getenv("KALSHI_GAME", "SF_LAR"))
+    parser.add_argument("--game", action="append", help="Game such as SF_LAR; repeat as needed")
     parser.add_argument("--date", default=os.getenv("KALSHI_GAME_DATE", datetime.now(ET).date().isoformat()))
     parser.add_argument("--output-dir", type=Path, default=Path(default_output))
     parser.add_argument("--key-id", help="Prefer KALSHI_API_KEY_ID")
@@ -606,6 +609,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--top-size-change must be non-negative")
     if "market_lifecycle_v2" not in args.channels:
         args.channels.append("market_lifecycle_v2")
+    configured_games = os.getenv("KALSHI_GAMES") or os.getenv("KALSHI_GAME", "SF_LAR")
+    args.games = args.game or [
+        game.strip() for game in configured_games.split(",") if game.strip()
+    ]
     return args
 
 
@@ -614,41 +621,80 @@ def request_stop(_signum, _frame) -> None:
     STOP = True
 
 
+async def collect_game(args: argparse.Namespace, game: str) -> None:
+    backoff = 1
+    while not STOP:
+        writer = None
+        try:
+            markets = await asyncio.to_thread(discover_markets, game, args.date)
+            if not markets:
+                if args.list_only:
+                    print(f"{game}: no matching active NFL markets", flush=True)
+                    return
+                raise RuntimeError("no matching active NFL markets")
+            counts = {
+                prop: sum(row["prop_type"] == prop for row in markets)
+                for prop in SERIES.values()
+            }
+            event_tickers = sorted({row["event_ticker"] for row in markets})
+            print(
+                f"{game}: discovered {len(markets)} active markets: "
+                f"{counts}; events={event_tickers}",
+                flush=True,
+            )
+            if args.list_only:
+                return
+
+            writer = JsonlWriter(args.output_dir, game, args.date)
+            compact_markets = [{
+                key: market.get(key) for key in (
+                    "ticker", "market_id", "event_ticker", "game", "market_kind",
+                    "prop_type", "player", "player_id", "threshold", "outcome_team",
+                    "title", "yes_sub_title", "status", "open_time", "close_time",
+                )
+            } for market in markets]
+            writer.write_discovery({
+                "record_type": "market_discovery",
+                "received_at": utc_now(),
+                "game": game,
+                "game_date": args.date,
+                "channels": args.channels,
+                "markets": compact_markets,
+            })
+            print(f"{game}: saving compact market events to {writer.path}", flush=True)
+            await collect(args, markets, writer)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"{game} setup error: {exc}; retrying in {backoff}s", flush=True)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+        finally:
+            if writer:
+                writer.close()
+
+
+async def run_games(args: argparse.Namespace) -> None:
+    results = await asyncio.gather(
+        *(collect_game(args, game) for game in args.games),
+        return_exceptions=True,
+    )
+    for game, result in zip(args.games, results):
+        if isinstance(result, BaseException):
+            print(f"{game} collector stopped unexpectedly: {result}", flush=True)
+
+
 def main() -> None:
     load_local_env()
     args = parse_args()
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
-    markets = discover_markets(args.game, args.date)
-    counts = {prop: sum(row["prop_type"] == prop for row in markets) for prop in SERIES.values()}
-    event_tickers = sorted({row["event_ticker"] for row in markets})
-    print(f"Discovered {len(markets)} active markets: {counts}; events={event_tickers}", flush=True)
-    if not markets:
-        raise SystemExit("No matching active NFL markets found")
-    if args.list_only:
-        return
-
-    writer = JsonlWriter(args.output_dir, args.game, args.date)
-    compact_markets = [{
-        key: market.get(key) for key in (
-            "ticker", "market_id", "event_ticker", "game", "market_kind", "prop_type",
-            "player", "player_id", "threshold", "outcome_team", "title", "yes_sub_title",
-            "status", "open_time", "close_time",
-        )
-    } for market in markets]
-    writer.write_discovery({
-        "record_type": "market_discovery",
-        "received_at": utc_now(),
-        "game": args.game,
-        "game_date": args.date,
-        "channels": args.channels,
-        "markets": compact_markets,
-    })
-    print(f"Saving compact market events to {writer.path}", flush=True)
-    try:
-        asyncio.run(collect(args, markets, writer))
-    finally:
-        writer.close()
+    if not args.list_only:
+        if not (args.key_id or os.getenv("KALSHI_API_KEY_ID")):
+            raise SystemExit("set KALSHI_API_KEY_ID")
+        load_private_key(args)
+    asyncio.run(run_games(args))
 
 
 if __name__ == "__main__":
