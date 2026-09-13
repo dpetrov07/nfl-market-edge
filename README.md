@@ -143,6 +143,33 @@ twice. Name the services `sportsbook-collector` and `kalshi-collector`, set the
 respective start command and variables above, then add one volume to each
 service with mount path `/data`. No public domain or cron schedule is needed.
 
+## Live NFL play-by-play
+
+The ESPN collector discovers every NFL game on a date and polls the games
+concurrently. It writes only new plays, corrections/removals, and source status
+events to a separate gzip JSONL file per game. Full API responses are discarded.
+
+```bash
+python scripts/collect_live_nfl_pbp.py --date 2026-09-13 --poll-seconds 1.5
+```
+
+For one Railway worker serving all games, attach one persistent volume at
+`/data`, set its Railway config-file path to `/railway.nfl-live.toml`, and set:
+
+```text
+NFL_LIVE_DATE=2026-09-13
+NFL_LIVE_POLL_SECONDS=1.5
+NFL_LIVE_OUTPUT_DIR=/data/nfl_live
+NFL_LIVE_START_MINUTES_BEFORE=10
+NFL_LIVE_STOP_HOURS_AFTER=8
+NFL_LIVE_FINAL_GRACE_MINUTES=10
+```
+
+`NFL_LIVE_GAME_IDS` may optionally contain comma-separated ESPN event IDs.
+Leave it unset to collect the entire date. The worker waits until shortly before
+each kickoff, then keeps that game alive through ESPN's final play plus the
+configured correction grace period.
+
 Install the small Python dependency set from `requirements.txt`. The completed
 canonical dataset does not need to be rebuilt for normal inspection.
 
