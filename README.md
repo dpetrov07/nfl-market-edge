@@ -108,8 +108,10 @@ but they may remove or suspend player props during a game.
 The Kalshi collector discovers one game's active receiving/rushing thresholds
 plus its game moneyline and spread ladders,
 subscribes to `ticker`, `orderbook_delta`, public `trade`, and market lifecycle.
-It keeps full books in memory and writes only top-of-book changes, trades,
-status/reconnect/gap events, and a compact five-second heartbeat to JSONL.
+It keeps full books in memory and writes only material top-of-book changes,
+trades, status/reconnect/gap events, and a compact five-second heartbeat to
+per-game `.jsonl.gz` files. Same-price size changes are saved after accumulating
+10 contracts by default.
 
 ```bash
 KALSHI_API_KEY_ID=... \
@@ -128,6 +130,7 @@ KALSHI_GAME=SF_LAR
 KALSHI_GAME_DATE=2026-09-10
 KALSHI_CHANNELS=ticker,orderbook_delta,trade,market_lifecycle_v2
 KALSHI_HEARTBEAT_SECONDS=5
+KALSHI_TOP_SIZE_CHANGE=10
 KALSHI_OUTPUT_DIR=/data/kalshi_live
 ```
 

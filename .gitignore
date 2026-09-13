@@ -9,3 +9,5 @@ data
 # Live captures are disposable until explicitly promoted.
 data/live/*
 !data/live/.gitkeep
+kalshi_ws_*.jsonl
+sportsbook_live/

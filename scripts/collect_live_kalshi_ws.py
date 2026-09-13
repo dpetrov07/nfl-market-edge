@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import base64
 import binascii
+import gzip
 import json
 import os
 import re
@@ -61,6 +62,7 @@ def load_local_env(path: Path = Path(".env")) -> None:
         "KALSHI_PRIVATE_KEY_B64",
         "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME", "KALSHI_GAME_DATE",
         "KALSHI_OUTPUT_DIR", "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS",
+        "KALSHI_TOP_SIZE_CHANGE",
     )
     for key in keys:
         if key in os.environ:
@@ -69,10 +71,12 @@ def load_local_env(path: Path = Path(".env")) -> None:
         if not match:
             continue
         value = match.group(1).strip()
-        if "PRIVATE_KEY" in key and "-----BEGIN" in value and "-----END" not in value:
-            end = re.search(r"-----END (?:RSA )?PRIVATE KEY-----", text[match.start(1) :])
-            if end:
-                value = text[match.start(1) : match.start(1) + end.end()].strip()
+        if "PRIVATE_KEY" in key and ("-----BEGIN" in value or not value):
+            start = text.find("-----BEGIN", match.start(1))
+            if start >= 0:
+                end = re.search(r"-----END (?:RSA )?PRIVATE KEY-----", text[start:])
+                if end:
+                    value = text[start : start + end.end()].strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         os.environ[key] = value.replace("\\n", "\n")
@@ -191,21 +195,51 @@ def auth_headers(key_id: str, private_key) -> dict[str, str]:
 
 
 class JsonlWriter:
-    def __init__(self, output_dir: Path, game: str):
+    def __init__(self, output_dir: Path, game: str, game_date: str):
         output_dir.mkdir(parents=True, exist_ok=True)
-        day = datetime.now(timezone.utc).date().isoformat()
         game_key = "_".join(requested_pair(game))
-        self.path = output_dir / f"kalshi_ws_{day}_{game_key}.jsonl"
-        self.handle = self.path.open("a", encoding="utf-8", buffering=1)
+        self.path = output_dir / f"kalshi_ws_{game_date}_{game_key}.jsonl.gz"
+        self.discovery_signature = self._last_discovery_signature()
+        self.handle = gzip.open(self.path, "at", encoding="utf-8", compresslevel=6)
+
+    @staticmethod
+    def _discovery_signature(record: dict) -> str:
+        payload = {key: value for key, value in record.items() if key != "received_at"}
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+    def _last_discovery_signature(self) -> str | None:
+        if not self.path.exists():
+            return None
+        signature = None
+        try:
+            with gzip.open(self.path, "rt", encoding="utf-8") as existing:
+                for line in existing:
+                    record = json.loads(line)
+                    if record.get("record_type") == "market_discovery":
+                        signature = self._discovery_signature(record)
+        except (EOFError, gzip.BadGzipFile, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        return signature
 
     def write(self, record: dict) -> None:
         self.handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
+
+    def write_discovery(self, record: dict) -> bool:
+        signature = self._discovery_signature(record)
+        if signature == self.discovery_signature:
+            return False
+        self.write(record)
+        self.discovery_signature = signature
+        return True
 
     def status(self, status: str, **details) -> None:
         self.write({"record_type": "collector_status", "received_at": utc_now(), "status": status, **details})
 
     def close(self) -> None:
         self.handle.close()
+
+    def flush(self) -> None:
+        self.handle.flush()
 
 
 def number(value, cents: bool = False) -> float | None:
@@ -224,13 +258,15 @@ def dollar_value(msg: dict, dollars_key: str, cents_key: str) -> float | None:
 class MarketState:
     """Maintain full books in memory and return only compact records worth saving."""
 
-    def __init__(self, tickers: list[str]):
+    def __init__(self, tickers: list[str], top_size_change: float = 10.0):
         self.tickers = set(tickers)
-        # With use_yes_price=true, yes levels are bids and no levels are YES asks.
+        self.top_size_change = top_size_change
+        # use_yes_price=true puts YES bids and YES asks on the same price scale.
         self.books = {ticker: {"yes": {}, "no": {}} for ticker in tickers}
         self.initialized: set[str] = set()
         self.last_top: dict[str, tuple] = {}
         self.last_status: dict[str, str] = {}
+        self.last_lifecycle: dict[str, tuple] = {}
         self.ticker_stats: dict[str, dict] = {}
 
     @staticmethod
@@ -243,7 +279,7 @@ class MarketState:
         for price, size in values or []:
             parsed_price, parsed_size = number(price, cents=cents), number(size)
             if parsed_price is not None and parsed_size and parsed_size > 0:
-                levels[parsed_price] = parsed_size
+                levels[parsed_price] = round(parsed_size, 4)
         return levels
 
     def _top_values(self, ticker: str) -> dict:
@@ -267,12 +303,20 @@ class MarketState:
         top = self._top_values(ticker)
         signature = tuple(top.values())
         previous = self.last_top.get(ticker)
-        if previous == signature:
-            return None
         names = tuple(top)
+        prices = {
+            "yes_bid_dollars", "yes_ask_dollars", "no_bid_dollars",
+            "no_ask_dollars", "spread_dollars",
+        }
         changed = list(names) if previous is None else [
-            name for name, old, new in zip(names, previous, signature) if old != new
+            name for name, old, new in zip(names, previous, signature)
+            if old != new and (
+                name in prices or old is None or new is None
+                or abs(new - old) >= self.top_size_change
+            )
         ]
+        if not changed:
+            return None
         self.last_top[ticker] = signature
         msg = raw.get("msg", {})
         return {
@@ -318,7 +362,7 @@ class MarketState:
                 delta = number(msg.get("delta"))
             if side in {"yes", "no"} and price is not None and delta is not None:
                 levels = self.books[ticker][side]
-                size = round(levels.get(price, 0) + delta, 10)
+                size = round(levels.get(price, 0) + delta, 4)
                 if size > 0:
                     levels[price] = size
                 else:
@@ -361,6 +405,14 @@ class MarketState:
 
         if message_type == "market_lifecycle_v2" and ticker in self.tickers:
             event_type = msg.get("event_type")
+            signature = (
+                event_type, msg.get("result"), msg.get("open_ts"), msg.get("close_ts"),
+                msg.get("determination_ts"), msg.get("settled_ts") or msg.get("settlement_ts"),
+                msg.get("settlement_value"),
+            )
+            if self.last_lifecycle.get(ticker) == signature:
+                return []
+            self.last_lifecycle[ticker] = signature
             if event_type:
                 self.last_status[ticker] = event_type
             return [{
@@ -435,7 +487,7 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                 await subscribe(ws, tickers, args.channels, writer)
                 backoff = 1
                 last_sequence = {}
-                state = MarketState(tickers)
+                state = MarketState(tickers, args.top_size_change)
                 connected_at = time.monotonic()
                 last_heartbeat = 0.0
                 last_message_at = None
@@ -457,6 +509,7 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                             "messages_received": message_count,
                             "last_message_at": last_message_at,
                         })
+                        writer.flush()
                         last_heartbeat = now
                     try:
                         raw_text = await asyncio.wait_for(ws.recv(), timeout=1)
@@ -468,13 +521,12 @@ async def collect(args: argparse.Namespace, markets: list[dict], writer: JsonlWr
                     try:
                         raw = json.loads(raw_text)
                     except (json.JSONDecodeError, TypeError) as exc:
-                        writer.write({
-                            "record_type": "malformed_ws_message",
-                            "received_at": received_at,
-                            "connection_id": connection_id,
-                            "error": str(exc),
-                            "raw_text": raw_text,
-                        })
+                        writer.status(
+                            "malformed_ws_message",
+                            connection_id=connection_id,
+                            error=str(exc),
+                            message_bytes=len(raw_text),
+                        )
                         continue
                     msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
                     sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
@@ -539,11 +591,19 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=float(os.getenv("KALSHI_HEARTBEAT_SECONDS", "5")),
     )
+    parser.add_argument(
+        "--top-size-change",
+        type=float,
+        default=float(os.getenv("KALSHI_TOP_SIZE_CHANGE", "10")),
+        help="Persist same-price top-size changes after this many contracts",
+    )
     args = parser.parse_args()
     args.channels = [item.strip() for item in args.channels.split(",") if item.strip()]
     unknown = set(args.channels) - set(CHANNELS)
     if unknown:
         parser.error(f"unsupported channels: {', '.join(sorted(unknown))}")
+    if args.top_size_change < 0:
+        parser.error("--top-size-change must be non-negative")
     if "market_lifecycle_v2" not in args.channels:
         args.channels.append("market_lifecycle_v2")
     return args
@@ -568,7 +628,7 @@ def main() -> None:
     if args.list_only:
         return
 
-    writer = JsonlWriter(args.output_dir, args.game)
+    writer = JsonlWriter(args.output_dir, args.game, args.date)
     compact_markets = [{
         key: market.get(key) for key in (
             "ticker", "market_id", "event_ticker", "game", "market_kind", "prop_type",
@@ -576,16 +636,14 @@ def main() -> None:
             "status", "open_time", "close_time",
         )
     } for market in markets]
-    writer.write(
-        {
-            "record_type": "market_discovery",
-            "received_at": utc_now(),
-            "game": args.game,
-            "game_date": args.date,
-            "channels": args.channels,
-            "markets": compact_markets,
-        }
-    )
+    writer.write_discovery({
+        "record_type": "market_discovery",
+        "received_at": utc_now(),
+        "game": args.game,
+        "game_date": args.date,
+        "channels": args.channels,
+        "markets": compact_markets,
+    })
     print(f"Saving compact market events to {writer.path}", flush=True)
     try:
         asyncio.run(collect(args, markets, writer))
