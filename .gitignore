@@ -4,6 +4,15 @@ __pycache__/
 .DS_Store
 *.log
 .env
+.env.*
+!.env.example
+.streamlit/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+model_output/
 
 data
 # Live captures are disposable until explicitly promoted.

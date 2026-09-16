@@ -84,7 +84,7 @@ The preserved local live capture is under `data/sunday_2026-09-13/`.
 Rank executable Kalshi prices observed immediately after clean Bovada repricings:
 
 ```bash
-python market_timing/rank_props.py --top 10
+python market_scorer/rank.py --top 10
 ```
 
 Add `--latest-only` for a live-style view with one most-recent signal per market;
@@ -93,7 +93,7 @@ without it, the output retains every historical decision-time snapshot for audit
 Look up a specific line with player, prop, and threshold filters:
 
 ```bash
-python market_timing/rank_props.py --latest-only \
+python market_scorer/rank.py --latest-only \
   --player "Nico Collins" --prop-type receiving_yards --threshold 79.5
 ```
 
@@ -109,3 +109,6 @@ the remaining `enter`, `watch`, and `pass` decisions are unchanged.
 Bovada update, at least 5 points of disagreement, spread no wider than 5 cents,
 and at least 50 contracts available. The reported fair-value range is the old to
 new Bovada no-vig interval, not a calibrated confidence interval.
+
+The model, live shadow scorer, and DAL-NYG replay UI are documented in
+[`market_scorer/README.md`](market_scorer/README.md).

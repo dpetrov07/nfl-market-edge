@@ -1,4 +1,4 @@
-"""Shared Bovada/Kalshi timing helpers."""
+"""Shared Bovada/Kalshi scoring and timing helpers."""
 
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ def bovada_price_events(
     min_move: float = 0.02,
     burst_seconds: float = 0.25,
     isolation_seconds: float = 12.0,
+    require_future_isolation: bool = True,
 ):
     """Return clean two-sided price-to-price changes; suspensions/reopens are excluded."""
     columns = [
@@ -158,7 +159,7 @@ def bovada_price_events(
             next_ok = index + 1 == len(events) or (
                 events[index + 1]["at"] - event["at"]
             ).total_seconds() > isolation_seconds
-            if prior_ok and next_ok:
+            if prior_ok and (next_ok or not require_future_isolation):
                 clean.append(event)
     clean.sort(key=lambda row: row["at"])
     return [event for event in clean if event["kind"] == "price"], len(pairs)
