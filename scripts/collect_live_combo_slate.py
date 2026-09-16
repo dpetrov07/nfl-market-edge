@@ -49,6 +49,7 @@ def compact_market(market: dict) -> dict:
         "close_time", "expected_expiration_time", "settlement_ts", "result",
         "settlement_value_dollars", "mve_collection_ticker", "mve_selected_legs",
         "floor_strike", "cap_strike", "custom_strike", "strike_type",
+        "prop_type", "player", "player_id", "threshold", "occurrence_datetime",
     )
     return {key: market.get(key) for key in fields if market.get(key) is not None}
 

@@ -87,14 +87,30 @@ cp config/combo_slate.example.json config/combo_slate.json
 Keep Kalshi running through settlement, then evaluate the captured slate:
 
 ```bash
+.venv/bin/python -m scripts.build_shadow_pricing \
+  --manifest config/combo_slate.json
+
 .venv/bin/python -m scripts.evaluate_prospective_combo_slate \
   --manifest config/combo_slate.json
 ```
 
 Captures land under `data/live/combo_slates/<slate_id>/`; evaluation results go
-to `research/output/<slate_id>/prospective/`. The frozen shortlist remains the
-historical rule—cross-game YES trades strictly below 10¢—rather than a
-calibrated model or order signal.
+to `research/output/<slate_id>/prospective/`. The shadow-pricing command can run
+before settlement and writes CSV/Parquet decisions plus a summary under
+`research/output/<slate_id>/shadow/`. Each row is one cross-game RFQ joined only
+to prices received by that timestamp. It uses the median two-way de-vigged
+probability from the available sportsbooks for each exact player/prop/line,
+multiplies the legs, widens the range for disagreement and freshness, and logs a
+whole-cent YES sale price that covers estimated fees and a 1¢ minimum edge. It
+requires two books per leg by default and never submits a quote. Re-running it
+after settlement adds hypothetical P&L and keeps the frozen `<10¢` rule as a
+separate comparison.
+
+The decision file includes the per-book inputs in `leg_pricing_json`, explicit
+skip reasons, market and observed trade prices, 10/30/60-second markouts when
+the capture covers those horizons, and settlement P&L. The frozen shortlist
+remains the historical rule—cross-game YES trades strictly below 10¢—rather
+than a calibrated model or order signal.
 
 The independent sportsbook-to-Kalshi player-prop scorer and Streamlit UI remain
 documented in [`market_scorer/`](market_scorer/README.md). Railway worker configs
