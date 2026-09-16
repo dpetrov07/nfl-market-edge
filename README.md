@@ -78,3 +78,34 @@ NFL_LIVE_FINAL_GRACE_MINUTES=10
 `NFL_LIVE_GAME_IDS` can optionally contain comma-separated ESPN event IDs.
 
 The preserved local live capture is under `data/sunday_2026-09-13/`.
+
+## Player-prop opportunity ranking
+
+Rank executable Kalshi prices observed immediately after clean Bovada repricings:
+
+```bash
+python market_timing/rank_props.py --top 10
+```
+
+Add `--latest-only` for a live-style view with one most-recent signal per market;
+without it, the output retains every historical decision-time snapshot for audit.
+
+Look up a specific line with player, prop, and threshold filters:
+
+```bash
+python market_timing/rank_props.py --latest-only \
+  --player "Nico Collins" --prop-type receiving_yards --threshold 79.5
+```
+
+The Parquet output includes the executable side/price and size, Bovada no-vig
+fair probability, gross and fee/slippage-adjusted edge, recent repricing scope,
+quote availability, neighboring-threshold sanity check, a coarse recommendation,
+the numeric heuristic labeled `signal_score`, and the recommendation tier's
+historical 10- and 30-second executable markouts. Sample size and historical
+hit/median statistics are displayed separately from the signal score.
+`strong` is the former `enter` group in the validated 50+ display-score band;
+the remaining `enter`, `watch`, and `pass` decisions are unchanged.
+`enter` requires the filters supported by the Sunday timing study: a game-wide
+Bovada update, at least 5 points of disagreement, spread no wider than 5 cents,
+and at least 50 contracts available. The reported fair-value range is the old to
+new Bovada no-vig interval, not a calibrated confidence interval.

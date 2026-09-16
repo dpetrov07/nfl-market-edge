@@ -1,4 +1,4 @@
-"""Shared Bovada/Kalshi event and executable-quote timing helpers."""
+"""Shared Bovada/Kalshi timing helpers."""
 
 from __future__ import annotations
 
@@ -252,6 +252,18 @@ def scan_kalshi_horizons(path: Path, events, horizons=(1, 3, 5, 10, 30)):
             "availability_censored": False,
             "min_size_while_available": size,
         })
+        event["neighbor_quotes"] = {}
+        for label, neighbor in event.get("neighbor_tickers", {}).items():
+            neighbor_quote = state.get(neighbor["ticker"])
+            if neighbor_quote:
+                event["neighbor_quotes"][label] = {
+                    **neighbor,
+                    "yes_bid": neighbor_quote["bid"],
+                    "yes_ask": neighbor_quote["ask"],
+                    "quote_age_seconds": (
+                        event["at"] - neighbor_quote["at"]
+                    ).total_seconds(),
+                }
         active[event["ticker"]].add(event["_scan_id"])
         for horizon in horizons:
             serial += 1
