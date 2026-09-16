@@ -1,4 +1,4 @@
-"""Continuously save current NFL player-prop odds from Bovada."""
+"""Continuously save current NFL/CFB player-prop odds from supported books."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests as http_requests
 from curl_cffi import requests
 
 
@@ -19,6 +20,24 @@ BOVADA_URL = (
     "https://www.bovada.lv/services/sports/event/coupon/events/A/description/"
     "football/nfl?lang=en"
 )
+BOVADA_URLS = {
+    "nfl": BOVADA_URL,
+    "ncaaf": (
+        "https://www.bovada.lv/services/sports/event/coupon/events/A/description/"
+        "football/college-football?lang=en"
+    ),
+}
+FANDUEL_BASE_URL = os.getenv(
+    "FANDUEL_BASE_URL", "https://sbapi.nj.sportsbook.fanduel.com/api"
+).rstrip("/")
+FANDUEL_PAGE_URL = f"{FANDUEL_BASE_URL}/content-managed-page"
+FANDUEL_EVENT_URL = f"{FANDUEL_BASE_URL}/event-page"
+FANDUEL_API_KEY = os.getenv("FANDUEL_API_KEY", "FhMFpcPWXMeyZxOx")
+BETRIVERS_OPERATOR = os.getenv("BETRIVERS_OPERATOR", "rsiusnj")
+BETRIVERS_BASE_URL = (
+    f"https://eu-offering-api.kambicdn.com/offering/v2018/{BETRIVERS_OPERATOR}"
+)
+BETRIVERS_PATHS = {"nfl": "american_football/nfl", "ncaaf": "american_football/ncaaf"}
 BOVADA_PROPS = {
     "Total Receiving Yards": "receiving_yards",
     "Total Rushing Yards": "rushing_yards",
@@ -26,6 +45,57 @@ BOVADA_PROPS = {
     "Alternate Receiving Yards": "receiving_yards",
     "Alternate Rushing Yards": "rushing_yards",
     "Alternate Receptions": "receptions",
+}
+FANDUEL_PROPS = {
+    "Receiving Yds": ("receiving_yards", False),
+    "Alt Receiving Yds": ("receiving_yards", True),
+    "Rushing Yds": ("rushing_yards", False),
+    "Alt Rushing Yds": ("rushing_yards", True),
+    "Total Receptions": ("receptions", False),
+    "Alt Receptions": ("receptions", True),
+    "Passing Yds": ("passing_yards", False),
+    "Alt Passing Yds": ("passing_yards", True),
+    "Passing TDs": ("passing_touchdowns", False),
+    "Alt Passing TDs": ("passing_touchdowns", True),
+}
+BETRIVERS_PROPS = {
+    "Receiving Yards": "receiving_yards",
+    "Rushing Yards": "rushing_yards",
+    "Receptions": "receptions",
+    "Passing Yards": "passing_yards",
+    "Touchdown Passes": "passing_touchdowns",
+}
+NFL_CITY_ALIASES = {
+    "ari": "arizona",
+    "atl": "atlanta",
+    "bal": "baltimore",
+    "buf": "buffalo",
+    "car": "carolina",
+    "chi": "chicago",
+    "cin": "cincinnati",
+    "cle": "cleveland",
+    "dal": "dallas",
+    "den": "denver",
+    "det": "detroit",
+    "gb": "green bay",
+    "hou": "houston",
+    "ind": "indianapolis",
+    "jax": "jacksonville",
+    "kc": "kansas city",
+    "lv": "las vegas",
+    "mia": "miami",
+    "min": "minnesota",
+    "ne": "new england",
+    "no": "new orleans",
+    "nyg": "new york giants",
+    "nyj": "new york jets",
+    "phi": "philadelphia",
+    "pit": "pittsburgh",
+    "sea": "seattle",
+    "sf": "san francisco",
+    "tb": "tampa bay",
+    "ten": "tennessee",
+    "was": "washington",
 }
 SCHEMA_VERSION = 1
 STOP = False
@@ -55,7 +125,10 @@ def parse_float(value) -> float | None:
 
 
 def normalize_game(value: str) -> str:
-    value = value.lower().replace("san francisco", "sf").replace("los angeles", "la")
+    value = re.sub(r"\(\d+\)", "", value.lower()).replace("(fl)", " florida")
+    for abbreviation, city in NFL_CITY_ALIASES.items():
+        value = re.sub(rf"\b{abbreviation}\b", city, value)
+    value = value.replace("los angeles", "la")
     return re.sub(r"[^a-z0-9]", "", value)
 
 
@@ -144,9 +217,9 @@ def bovada_prop_markets(event: dict, include_inactive: bool = False) -> list[dic
     return found
 
 
-def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
+def fetch_bovada(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict], list[str]]:
     fetched_at = utc_now()
-    response = requests.get(BOVADA_URL, impersonate="chrome120", timeout=15)
+    response = requests.get(BOVADA_URLS[sport], impersonate="chrome120", timeout=15)
     response.raise_for_status()
     payload = response.json()
     events = payload[0].get("events", []) if isinstance(payload, list) and payload else []
@@ -249,6 +322,205 @@ def fetch_bovada(game: str, poll_id: str) -> tuple[list[dict], list[str]]:
     return rows, []
 
 
+def fanduel_prop_market(market: dict) -> tuple[str, str, bool] | None:
+    name = market.get("marketName", "")
+    if " - " not in name:
+        return None
+    player, suffix = name.rsplit(" - ", 1)
+    prop = FANDUEL_PROPS.get(suffix)
+    if not prop:
+        return None
+    return player, prop[0], prop[1]
+
+
+def fetch_fanduel(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict], list[str]]:
+    """Fetch FanDuel's unauthenticated frontend JSON; no cookies or browser needed."""
+    response = http_requests.get(
+        FANDUEL_PAGE_URL,
+        params={"page": "CUSTOM", "customPageId": sport, "_ak": FANDUEL_API_KEY},
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    events = payload.get("attachments", {}).get("events", {})
+    fetched_at = utc_now()
+    rows = []
+    errors = []
+    for event_id, event in events.items():
+        if " @ " not in event.get("name", "") or not game_matches(event.get("name", ""), game):
+            continue
+        try:
+            detail_response = http_requests.get(
+                FANDUEL_EVENT_URL,
+                params={"eventId": event_id, "tab": "popular", "_ak": FANDUEL_API_KEY},
+                headers={"Accept": "application/json"},
+                timeout=20,
+            )
+            detail_response.raise_for_status()
+            detail = detail_response.json()
+        except Exception as exc:
+            errors.append(f"event {event_id}: {type(exc).__name__}: {exc}")
+            continue
+
+        away, home = event["name"].split(" @ ", 1)
+        markets = detail.get("attachments", {}).get("markets", {}).values()
+        for market in markets:
+            parsed = fanduel_prop_market(market)
+            if not parsed or market.get("marketStatus") != "OPEN":
+                continue
+            player, prop_type, is_alternate = parsed
+            by_threshold: dict[float, dict[str, dict]] = {}
+            for runner in market.get("runners", []):
+                if runner.get("runnerStatus") != "ACTIVE":
+                    continue
+                side = str(runner.get("result", {}).get("type", "")).lower()
+                threshold = parse_float(runner.get("handicap"))
+                if is_alternate:
+                    match = re.search(r"(\d+(?:\.\d+)?)\+", runner.get("runnerName", ""))
+                    if not match:
+                        continue
+                    side = "over"
+                    threshold = float(match.group(1)) - 0.5
+                elif side not in {"over", "under"}:
+                    lowered = runner.get("runnerName", "").lower()
+                    side = "over" if lowered.endswith(" over") else "under" if lowered.endswith(" under") else ""
+                if side not in {"over", "under"} or threshold is None:
+                    continue
+                by_threshold.setdefault(threshold, {})[side] = runner
+
+            for threshold, sides in by_threshold.items():
+                over, under = sides.get("over", {}), sides.get("under", {})
+                rows.append(
+                    {
+                        "record_type": "quote",
+                        "schema_version": SCHEMA_VERSION,
+                        "poll_id": poll_id,
+                        "sportsbook": "fanduel",
+                        "fetched_at": fetched_at,
+                        "source_update_at": None,
+                        "game": event.get("name"),
+                        "event_id": str(event_id),
+                        "scheduled_start": event.get("openDate"),
+                        "event_status": "live" if event.get("inPlay") else "scheduled",
+                        "is_live": bool(event.get("inPlay")),
+                        "away_team": away,
+                        "home_team": home,
+                        "player": player,
+                        "player_id": None,
+                        "player_team": None,
+                        "market_type": prop_type,
+                        "prop_type": prop_type,
+                        "is_alternate": is_alternate,
+                        "market_id": str(market.get("marketId")),
+                        "threshold": threshold,
+                        "over_odds": parse_american(
+                            over.get("winRunnerOdds", {}).get("americanDisplayOdds", {}).get("americanOdds")
+                        ),
+                        "under_odds": parse_american(
+                            under.get("winRunnerOdds", {}).get("americanDisplayOdds", {}).get("americanOdds")
+                        ),
+                        "over_selection_id": str(over.get("selectionId")) if over else None,
+                        "under_selection_id": str(under.get("selectionId")) if under else None,
+                    }
+                )
+    return rows, errors
+
+
+def betrivers_prop(criterion: str) -> tuple[str, bool, float | None] | None:
+    for label, prop_type in BETRIVERS_PROPS.items():
+        if criterion.startswith(f"Total {label}"):
+            return prop_type, False, None
+        match = re.match(rf"(\d+(?:\.\d+)?)\+ {re.escape(label)}\b", criterion, re.IGNORECASE)
+        if match:
+            return prop_type, True, float(match.group(1)) - 0.5
+    return None
+
+
+def fetch_betrivers(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict], list[str]]:
+    """Fetch BetRivers' public Kambi list and per-event JSON endpoints."""
+    list_url = f"{BETRIVERS_BASE_URL}/listView/{BETRIVERS_PATHS[sport]}/all/all/matches.json"
+    response = http_requests.get(list_url, params={"lang": "en_US", "market": "US"}, timeout=20)
+    response.raise_for_status()
+    wrappers = response.json().get("events", [])
+    fetched_at = utc_now()
+    rows = []
+    errors = []
+    for wrapper in wrappers:
+        event = wrapper.get("event", {})
+        event_id = event.get("id")
+        if not event_id or not game_matches(event.get("name", ""), game):
+            continue
+        try:
+            detail_response = http_requests.get(
+                f"{BETRIVERS_BASE_URL}/betoffer/event/{event_id}.json",
+                params={"lang": "en_US", "market": "US"},
+                timeout=20,
+            )
+            detail_response.raise_for_status()
+            offers = detail_response.json().get("betOffers", [])
+        except Exception as exc:
+            errors.append(f"event {event_id}: {type(exc).__name__}: {exc}")
+            continue
+
+        for offer in offers:
+            if offer.get("betOfferType", {}).get("name") != "Player Occurrence Line":
+                continue
+            parsed = betrivers_prop(offer.get("criterion", {}).get("label", ""))
+            if not parsed:
+                continue
+            prop_type, is_alternate, alternate_threshold = parsed
+            grouped: dict[tuple[str, float], dict[str, dict]] = {}
+            for outcome in offer.get("outcomes", []):
+                if outcome.get("status") != "OPEN" or not outcome.get("participant"):
+                    continue
+                side = str(outcome.get("label", "")).lower()
+                if side == "yes":
+                    side = "over"
+                if side not in {"over", "under"}:
+                    continue
+                line = alternate_threshold
+                if line is None:
+                    raw_line = parse_float(outcome.get("line"))
+                    line = raw_line / 1000 if raw_line is not None else None
+                if line is None:
+                    continue
+                grouped.setdefault((outcome["participant"], line), {})[side] = outcome
+
+            for (player, threshold), sides in grouped.items():
+                over, under = sides.get("over", {}), sides.get("under", {})
+                rows.append(
+                    {
+                        "record_type": "quote",
+                        "schema_version": SCHEMA_VERSION,
+                        "poll_id": poll_id,
+                        "sportsbook": "betrivers",
+                        "fetched_at": fetched_at,
+                        "source_update_at": None,
+                        "game": event.get("name"),
+                        "event_id": str(event_id),
+                        "scheduled_start": event.get("start"),
+                        "event_status": event.get("state"),
+                        "is_live": event.get("state") != "NOT_STARTED",
+                        "away_team": event.get("awayName"),
+                        "home_team": event.get("homeName"),
+                        "player": player,
+                        "player_id": None,
+                        "player_team": None,
+                        "market_type": prop_type,
+                        "prop_type": prop_type,
+                        "is_alternate": is_alternate,
+                        "market_id": str(offer.get("id")),
+                        "threshold": threshold,
+                        "over_odds": parse_american(over.get("oddsAmerican")),
+                        "under_odds": parse_american(under.get("oddsAmerican")),
+                        "over_selection_id": str(over.get("id")) if over else None,
+                        "under_selection_id": str(under.get("id")) if under else None,
+                    }
+                )
+    return rows, errors
+
+
 def source_record(
     poll_id: str, sportsbook: str, started_at: str, rows: list[dict], errors: list[str]
 ) -> dict:
@@ -267,10 +539,10 @@ def source_record(
     }
 
 
-def append_records(output_dir: Path, records: list[dict]) -> Path:
+def append_records(output_dir: Path, records: list[dict], sport: str = "nfl") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     day = datetime.now(timezone.utc).date().isoformat()
-    path = output_dir / f"nfl_player_props_{day}.jsonl"
+    path = output_dir / f"{sport}_player_props_{day}.jsonl"
     with path.open("a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -288,7 +560,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--books",
         default=os.getenv("SPORTSBOOK_BOOKS", "bovada"),
-        help="Comma-separated sportsbook list (currently: bovada)",
+        help="Comma-separated sportsbook list (bovada,fanduel,betrivers)",
+    )
+    parser.add_argument(
+        "--sport",
+        choices=("nfl", "ncaaf"),
+        default=os.getenv("SPORTSBOOK_SPORT", "nfl").lower(),
     )
     parser.add_argument(
         "--interval",
@@ -303,7 +580,7 @@ def parse_args() -> argparse.Namespace:
     if not args.game:
         parser.error("set --game or SPORTSBOOK_GAME")
     args.books = [book.strip().lower() for book in args.books.split(",") if book.strip()]
-    unknown = set(args.books) - {"bovada"}
+    unknown = set(args.books) - {"bovada", "fanduel", "betrivers"}
     if unknown:
         parser.error(f"unsupported books: {', '.join(sorted(unknown))}")
     return args
@@ -318,7 +595,11 @@ def main() -> None:
     args = parse_args()
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    fetchers = {"bovada": fetch_bovada}
+    fetchers = {
+        "bovada": fetch_bovada,
+        "fanduel": fetch_fanduel,
+        "betrivers": fetch_betrivers,
+    }
     print(
         f"Collecting {args.game!r} from {', '.join(args.books)} every {args.interval:g}s "
         f"into {args.output_dir}",
@@ -332,7 +613,7 @@ def main() -> None:
         records = []
         for book in args.books:
             try:
-                rows, errors = fetchers[book](args.game, poll_id)
+                rows, errors = fetchers[book](args.game, poll_id, args.sport)
             except Exception as exc:
                 rows, errors = [], [f"{type(exc).__name__}: {exc}"]
             records.extend(rows)
@@ -341,7 +622,7 @@ def main() -> None:
             print(f"{records[-1]['fetched_at']} {book}: {len(rows)} quotes ({status})", flush=True)
             for error in errors:
                 print(f"  {book} error: {error}", flush=True)
-        path = append_records(args.output_dir, records)
+        path = append_records(args.output_dir, records, args.sport)
         print(f"saved {len(records)} records -> {path}", flush=True)
         poll_number += 1
         if args.once or (args.max_polls and poll_number >= args.max_polls):
