@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700">
+<title>Seller edge by combo structure</title>
+<desc>Equal-combo and volume-weighted seller returns plus fifth-percentile downside for same-game and cross-game two- and three-leg combos.</desc>
+<rect width="1180" height="700" fill="white"/>
+<text x="70.0" y="42.0" font-family="Arial, sans-serif" font-size="25" text-anchor="start" font-weight="bold" fill="#20252b">Where the seller edge appears by combo structure</text>
+<text x="70.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">One position per combo at its observed volume-weighted price</text>
+<line x1="285.0" y1="95" x2="285.0" y2="430" stroke="#d9dee4"/>
+<text x="285.0" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">-2¢</text>
+<line x1="468.3" y1="95" x2="468.3" y2="430" stroke="#20252b"/>
+<text x="468.3" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">+0¢</text>
+<line x1="651.7" y1="95" x2="651.7" y2="430" stroke="#d9dee4"/>
+<text x="651.7" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">+2¢</text>
+<line x1="835.0" y1="95" x2="835.0" y2="430" stroke="#d9dee4"/>
+<text x="835.0" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">+4¢</text>
+<line x1="1018.3" y1="95" x2="1018.3" y2="430" stroke="#d9dee4"/>
+<text x="1018.3" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">+6¢</text>
+<text x="267.0" y="131.0" font-family="Arial, sans-serif" font-size="15" text-anchor="end" font-weight="bold" fill="#20252b">Cross-game · 2 legs</text>
+<rect x="468.3" y="105.0" width="284.9" height="16" fill="#159b76"/>
+<text x="760.2" y="118.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#159b76">+3.11¢</text>
+<rect x="468.3" y="129.0" width="373.6" height="16" fill="#1677b3"/>
+<text x="849.0" y="142.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#1677b3">+4.08¢</text>
+<text x="267.0" y="154.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="normal" fill="#68717c">n=7,479 · 21.50m contracts · YES settled 27.5%</text>
+<text x="267.0" y="213.0" font-family="Arial, sans-serif" font-size="15" text-anchor="end" font-weight="bold" fill="#20252b">Cross-game · 3 legs</text>
+<rect x="468.3" y="187.0" width="403.7" height="16" fill="#159b76"/>
+<text x="879.0" y="200.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#159b76">+4.40¢</text>
+<rect x="468.3" y="211.0" width="545.7" height="16" fill="#1677b3"/>
+<text x="1021.1" y="224.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#1677b3">+5.95¢</text>
+<text x="267.0" y="236.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="normal" fill="#68717c">n=15,092 · 29.41m contracts · YES settled 15.5%</text>
+<text x="267.0" y="295.0" font-family="Arial, sans-serif" font-size="15" text-anchor="end" font-weight="bold" fill="#20252b">Same-game · 2 legs</text>
+<rect x="354.0" y="269.0" width="114.3" height="16" fill="#159b76"/>
+<text x="347.0" y="282.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#159b76">-1.25¢</text>
+<rect x="468.3" y="293.0" width="236.1" height="16" fill="#1677b3"/>
+<text x="711.5" y="306.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#1677b3">+2.58¢</text>
+<text x="267.0" y="318.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="normal" fill="#68717c">n=3,498 · 2.50m contracts · YES settled 30.1%</text>
+<text x="267.0" y="377.0" font-family="Arial, sans-serif" font-size="15" text-anchor="end" font-weight="bold" fill="#20252b">Same-game · 3 legs</text>
+<rect x="468.3" y="351.0" width="145.2" height="16" fill="#159b76"/>
+<text x="620.5" y="364.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#159b76">+1.58¢</text>
+<rect x="468.3" y="375.0" width="245.2" height="16" fill="#1677b3"/>
+<text x="720.5" y="388.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#1677b3">+2.67¢</text>
+<text x="267.0" y="400.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="normal" fill="#68717c">n=3,497 · 1.10m contracts · YES settled 19.2%</text>
+<rect x="285" y="480" width="15" height="15" fill="#159b76"/>
+<text x="308.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">equal combo</text>
+<rect x="420" y="480" width="15" height="15" fill="#1677b3"/>
+<text x="443.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">volume weighted</text>
+<text x="70.0" y="535.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Left tail of equal-combo outcomes</text>
+<text x="70.0" y="560.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">5th-percentile net P&amp;L per contract</text>
+<line x1="399.4" y1="572" x2="399.4" y2="658" stroke="#d9dee4"/>
+<text x="399.4" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">-80¢</text>
+<line x1="577.1" y1="572" x2="577.1" y2="658" stroke="#d9dee4"/>
+<text x="577.1" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">-60¢</text>
+<line x1="754.7" y1="572" x2="754.7" y2="658" stroke="#d9dee4"/>
+<text x="754.7" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">-40¢</text>
+<line x1="932.4" y1="572" x2="932.4" y2="658" stroke="#d9dee4"/>
+<text x="932.4" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">-20¢</text>
+<line x1="1110.0" y1="572" x2="1110.0" y2="658" stroke="#d9dee4"/>
+<text x="1110.0" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0¢</text>
+<text x="341.0" y="589.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">Cross-game · 2 legs</text>
+<line x1="450.3" y1="585.0" x2="1110.0" y2="585.0" stroke="#eef2f5" stroke-width="8"/>
+<circle cx="450.3" cy="585.0" r="6" fill="#c44e52"/>
+<text x="441.3" y="589.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#c44e52">-74.3¢</text>
+<text x="341.0" y="611.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">Cross-game · 3 legs</text>
+<line x1="403.1" y1="607.0" x2="1110.0" y2="607.0" stroke="#eef2f5" stroke-width="8"/>
+<circle cx="403.1" cy="607.0" r="6" fill="#c44e52"/>
+<text x="394.1" y="611.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#c44e52">-79.6¢</text>
+<text x="341.0" y="633.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">Same-game · 2 legs</text>
+<line x1="435.1" y1="629.0" x2="1110.0" y2="629.0" stroke="#eef2f5" stroke-width="8"/>
+<circle cx="435.1" cy="629.0" r="6" fill="#c44e52"/>
+<text x="426.1" y="633.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#c44e52">-76.0¢</text>
+<text x="341.0" y="655.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">Same-game · 3 legs</text>
+<line x1="402.9" y1="651.0" x2="1110.0" y2="651.0" stroke="#eef2f5" stroke-width="8"/>
+<circle cx="402.9" cy="651.0" r="6" fill="#c44e52"/>
+<text x="393.9" y="655.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#c44e52">-79.6¢</text>
+</svg>

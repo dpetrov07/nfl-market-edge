@@ -1,0 +1,99 @@
+{
+  "candidate": {
+    "any_positive_settlement_rate": 0.032689144736842105,
+    "by_leg_count": {
+      "2": {
+        "any_positive_settlement_rate": 0.02531645569620253,
+        "combos": 1185,
+        "contracts": 4864441.71,
+        "equal_combo_net_per_contract": 0.022700416273006098,
+        "fills": 8269,
+        "full_yes_settlement_rate": 0.02531645569620253,
+        "mean_settlement": 0.02531645569620253,
+        "mean_vwap": 0.05137208923517748,
+        "median_net_per_contract": 0.046675,
+        "p05_net_per_contract": 0.00558252,
+        "p95_net_per_contract": 0.08803852000000001,
+        "volume_weighted_net_per_contract": 0.0064925629699267035,
+        "worst_net_per_contract": -0.9860342499999999
+      },
+      "3": {
+        "any_positive_settlement_rate": 0.03506387605327534,
+        "combos": 3679,
+        "contracts": 7604197.98,
+        "equal_combo_net_per_contract": 0.016032925625700377,
+        "fills": 13747,
+        "full_yes_settlement_rate": 0.03452025006795325,
+        "mean_settlement": 0.03467790160369666,
+        "mean_vwap": 0.05424612883677373,
+        "median_net_per_contract": 0.04948662999999999,
+        "p05_net_per_contract": 0.00372112,
+        "p95_net_per_contract": 0.08827460495208048,
+        "volume_weighted_net_per_contract": 0.01530525430549361,
+        "worst_net_per_contract": -0.9888299199999999
+      }
+    },
+    "combos": 4864,
+    "contracts": 12468639.69,
+    "definition": "cross-game fills with YES execution price < $0.10",
+    "directional_leg_slots": 13407,
+    "equal_combo_net_per_contract": 0.017657304000917744,
+    "equal_position_gains": 233.27548481634565,
+    "equal_position_losses": -147.39035815588176,
+    "equal_position_net": 85.88512666046391,
+    "fills": 22016,
+    "full_yes_settlement_rate": 0.03227796052631579,
+    "leave_one_game_out_edge_range": [
+      0.011895743507092731,
+      0.024187568342413767
+    ],
+    "losing_equal_positions": 159,
+    "loss_combo_volume_share": 0.02115857916814982,
+    "max_directional_leg": "Tampa Bay | moneyline | YES",
+    "max_directional_leg_share": 0.0703125,
+    "mean_gain_per_contract": 0.049580336836630316,
+    "mean_loss_per_contract": -0.9269833846281872,
+    "mean_settlement": 0.03239720394736842,
+    "mean_vwap": 0.05354593621179602,
+    "median_net_per_contract": 0.04854928,
+    "p05_net_per_contract": 0.004571695573882896,
+    "p95_net_per_contract": 0.088038758,
+    "profitable_equal_positions": 4705,
+    "three_leg_combos": 3679,
+    "top_100_combo_volume_share": 0.5714558931167576,
+    "top_10_combo_volume_share": 0.18759615789330744,
+    "top_1_combo_volume_share": 0.037303746163507914,
+    "two_leg_combos": 1185,
+    "unique_directional_legs": 1350,
+    "volume_weighted_net_per_contract": 0.0118671227710273,
+    "worst_net_per_contract": -0.9888299199999999
+  },
+  "notes": [
+    "Seller P&L is YES execution price minus settlement, less the existing 7% p(1-p) fee estimate.",
+    "Equal-combo is the primary descriptive weighting; observed-volume weighting is also reported.",
+    "Price buckets contain executions, so a combo can appear in more than one bucket.",
+    "This is one settled Sunday slate with correlated combos, not an out-of-sample strategy test."
+  ],
+  "overall": {
+    "any_positive_settlement_rate": 0.20824595819522423,
+    "combos": 29566,
+    "contracts": 54513190.43000001,
+    "equal_combo_net_per_contract": 0.03073745491805911,
+    "fills": 182951,
+    "full_yes_settlement_rate": 0.20685923019684774,
+    "mean_settlement": 0.20751200703510786,
+    "mean_vwap": 0.249147054717839,
+    "median_net_per_contract": 0.13591815759181872,
+    "p05_net_per_contract": -0.77084052,
+    "p95_net_per_contract": 0.442612,
+    "volume_weighted_net_per_contract": 0.0499199494142279,
+    "worst_net_per_contract": -0.9888299199999999
+  },
+  "sample": {
+    "all_combo_volume_reconciles": true,
+    "any_trade_history_truncated": false,
+    "combos": 29566,
+    "contracts": 54513190.43,
+    "fills": 182951
+  }
+}

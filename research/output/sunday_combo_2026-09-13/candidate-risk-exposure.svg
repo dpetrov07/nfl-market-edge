@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760">
+<title>Candidate risk and exposure</title>
+<desc>Gain and loss asymmetry, volume concentration, underlying overlap, and game exposure for cross-game combo fills below ten cents.</desc>
+<rect width="1180" height="760" fill="white"/>
+<text x="65.0" y="42.0" font-family="Arial, sans-serif" font-size="25" text-anchor="start" font-weight="bold" fill="#20252b">Cross-game YES &lt;10¢: positive average, asymmetric slate risk</text>
+<text x="65.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">One equal-sized position per unique combo; correlated exposures are counted, not diversified away</text>
+<text x="65.0" y="115.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Outcome asymmetry</text>
+<rect x="65" y="135" width="190" height="115" rx="8" fill="#eef2f5"/>
+<rect x="65" y="135" width="8" height="115" rx="4" fill="#159b76"/>
+<text x="89.0" y="168.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">4,705 gains</text>
+<text x="89.0" y="198.0" font-family="Arial, sans-serif" font-size="15" text-anchor="start" font-weight="normal" fill="#159b76">mean +4.96¢</text>
+<text x="89.0" y="225.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">equal-position sum $+233.28</text>
+<rect x="285" y="135" width="190" height="115" rx="8" fill="#eef2f5"/>
+<rect x="285" y="135" width="8" height="115" rx="4" fill="#c44e52"/>
+<text x="309.0" y="168.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">159 losses</text>
+<text x="309.0" y="198.0" font-family="Arial, sans-serif" font-size="15" text-anchor="start" font-weight="normal" fill="#c44e52">mean -92.70¢</text>
+<text x="309.0" y="225.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">equal-position sum -$147.39</text>
+<text x="65.0" y="286.0" font-family="Arial, sans-serif" font-size="15" text-anchor="start" font-weight="bold" fill="#20252b">Net across 4,864 equal positions: $+85.89 (+1.77¢ each)</text>
+<text x="65.0" y="314.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">5th percentile +0.46¢ · worst -98.88¢</text>
+<text x="65.0" y="350.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Observed-volume concentration</text>
+<text x="65.0" y="382.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">Top 1 / 10 / 100 combos: 3.7% / 18.8% / 57.1% of contracts</text>
+<text x="65.0" y="408.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Only 2.1% of observed contracts sat in losing combos; volume-weighted results are therefore fragile.</text>
+<text x="65.0" y="458.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Underlying overlap</text>
+<text x="65.0" y="488.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">1,350 unique directional legs across 13,407 leg slots</text>
+<text x="65.0" y="515.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Largest repeated leg: Tampa Bay | moneyline | YES (7.0% of combos)</text>
+<text x="65.0" y="565.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Tail interpretation</text>
+<text x="65.0" y="597.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">A typical win earns about 5¢; a settled-YES loss costs about 93¢.</text>
+<text x="65.0" y="623.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">The one-slate average is positive because only 159 of 4,864 positions lost.</text>
+<text x="625.0" y="115.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Game exposure</text>
+<text x="625.0" y="139.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Share of candidate combos containing each game</text>
+<text x="748.0" y="184.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">CLE @ JAC</text>
+<rect x="760" y="170" width="167.5" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="934.5" y="184.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">14.8%</text>
+<text x="748.0" y="221.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">NYJ @ TEN</text>
+<rect x="760" y="207" width="187.3" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="954.3" y="221.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">16.5%</text>
+<text x="748.0" y="258.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">TB @ CIN</text>
+<rect x="760" y="244" width="202.7" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="969.7" y="258.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">17.9%</text>
+<text x="748.0" y="295.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">BAL @ IND</text>
+<rect x="760" y="281" width="206.0" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="973.0" y="295.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">18.2%</text>
+<text x="748.0" y="332.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">DAL @ NYG</text>
+<rect x="760" y="318" width="217.6" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="984.6" y="332.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">19.2%</text>
+<text x="748.0" y="369.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">MIA @ LV</text>
+<rect x="760" y="355" width="226.5" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="993.5" y="369.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">20.0%</text>
+<text x="748.0" y="406.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">ATL @ PIT</text>
+<rect x="760" y="392" width="231.6" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="998.6" y="406.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">20.4%</text>
+<text x="748.0" y="443.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">CHI @ CAR</text>
+<rect x="760" y="429" width="249.5" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1016.5" y="443.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">22.0%</text>
+<text x="748.0" y="480.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">GB @ MIN</text>
+<rect x="760" y="466" width="263.3" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1030.3" y="480.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">23.2%</text>
+<text x="748.0" y="517.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">BUF @ HOU</text>
+<rect x="760" y="503" width="270.3" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1037.3" y="517.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">23.8%</text>
+<text x="748.0" y="554.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">WAS @ PHI</text>
+<rect x="760" y="540" width="273.8" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1040.8" y="554.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">24.2%</text>
+<text x="748.0" y="591.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">ARI @ LAC</text>
+<rect x="760" y="577" width="280.8" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1047.8" y="591.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">24.8%</text>
+<text x="748.0" y="628.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#20252b">NO @ DET</text>
+<rect x="760" y="614" width="304.1" height="19" fill="#1677b3" opacity="0.85"/>
+<text x="1071.1" y="628.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">26.8%</text>
+<text x="625.0" y="680.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Leave-one-game-out equal edge stayed between +1.19¢ and +2.42¢.</text>
+</svg>
