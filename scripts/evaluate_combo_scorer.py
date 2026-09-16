@@ -54,19 +54,26 @@ def score_rows(path: Path):
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError(f"{path} is missing columns: {', '.join(missing)}")
-    label = path.parents[1].name
+    label = str(data.slate_id.iloc[0]) if "slate_id" in data else path.parents[1].name
     scores = []
     for row in data.itertuples(index=False):
+        optional = lambda value: None if pd.isna(value) else value
         score = score_snapshot(
             yes_price=row.yes_price,
-            scope="cross_game",
+            scope=getattr(row, "scope", "cross_game"),
             leg_count=row.leg_count,
             distinct_leg_games=row.distinct_leg_games,
-            component_bid_product=row.component_bid_product,
-            component_mid_product=row.component_mid_product,
-            component_ask_product=row.component_ask_product,
-            max_quote_age_seconds=row.max_quote_age_seconds,
-            max_leg_spread=row.max_leg_spread,
+            component_bid_product=optional(row.component_bid_product),
+            component_mid_product=optional(row.component_mid_product),
+            component_ask_product=optional(row.component_ask_product),
+            max_quote_age_seconds=optional(row.max_quote_age_seconds),
+            max_leg_spread=optional(row.max_leg_spread),
+            combo_bid=optional(getattr(row, "combo_bid", None)),
+            combo_ask=optional(getattr(row, "combo_ask", None)),
+            combo_quote_age_seconds=optional(
+                getattr(row, "combo_quote_age_seconds", None)
+            ),
+            available_size=optional(getattr(row, "available_size", None)),
         )
         scores.append(
             {
@@ -80,14 +87,25 @@ def score_rows(path: Path):
                     key: score[key]
                     for key in (
                         "fair_value",
+                        "fair_value_low",
+                        "fair_value_high",
+                        "fair_value_method",
                         "structural_seller_edge_after_fee",
                         "expected_net_edge",
                         "historical_net_edge_prior",
                         "recommendation",
                         "worth_considering",
                         "reason",
+                        "available_size",
                     )
                 },
+                "confidence": score["uncertainty"]["confidence"],
+                "component_quote_quality_pass": score["uncertainty"][
+                    "quote_quality_pass"
+                ],
+                "combo_book_quality_pass": score["uncertainty"][
+                    "combo_book_quality_pass"
+                ],
             }
         )
     return pd.DataFrame(scores)

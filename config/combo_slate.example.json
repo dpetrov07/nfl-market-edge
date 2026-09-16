@@ -1,0 +1,20 @@
+{
+  "slate_id": "nfl-2026-09-20",
+  "league": "nfl",
+  "date": "2026-09-20",
+  "events": [
+    {"ticker": "REPLACE_WITH_KALSHI_EVENT_TICKER", "game": "AWAY @ HOME"}
+  ],
+  "sportsbooks": {
+    "bovada": {
+      "enabled": true,
+      "games": ["AWAY @ HOME"]
+    },
+    "multi_book": {
+      "enabled": false,
+      "books": ["bovada", "fanduel", "betrivers"],
+      "games": ["AWAY @ HOME"],
+      "interval_seconds": 30
+    }
+  }
+}

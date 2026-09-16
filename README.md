@@ -89,3 +89,33 @@ probabilities.
 - Preprocessing and mapping scripts normalize those feeds into Parquet used by
   the scorer and research. The preserved Sunday capture is under
   `data/sunday_2026-09-13/`; Railway configs remain available for collectors.
+
+### Prospective combo validation
+
+Copy [`config/combo_slate.example.json`](config/combo_slate.example.json), add
+the slate's exact Kalshi game event tickers, then start the synchronized Kalshi
+and sportsbook capture:
+
+```bash
+python scripts/collect_combo_slate.py --manifest config/combo_slate.json
+```
+
+The Kalshi stream records combo RFQs, account-visible quotes, fills, combo and
+component books, sizes, lifecycle/settlement events, and local/exchange
+timestamps in `data/live/combo_slates/<slate_id>/`. RFQs are public; quote
+notifications are only visible when the authenticated account is involved.
+The current Bovada WebSocket adapter still handles NFL props. The optional
+`multi_book` poller has the normalized adapter boundary for Bovada and other
+books/CFB; adding Pinnacle later is one fetcher plus one registry entry in
+[`scripts/collect_live_sportsbook_props.py`](scripts/collect_live_sportsbook_props.py).
+Streaming adapters emit the common selection-state record in
+[`scripts/sportsbook_schema.py`](scripts/sportsbook_schema.py).
+
+After settlement, run the frozen scorer and `<10¢` benchmark once:
+
+```bash
+python scripts/evaluate_prospective_combo_slate.py --manifest config/combo_slate.json
+```
+
+This writes timestamp-matched fill/RFQ features, scored fills, and the fixed-rule
+evaluation under `research/output/<slate_id>/prospective/`.

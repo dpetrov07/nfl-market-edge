@@ -282,6 +282,13 @@ class MarketState:
         self.last_lifecycle: dict[str, tuple] = {}
         self.ticker_stats: dict[str, dict] = {}
 
+    def add_tickers(self, tickers: list[str]) -> None:
+        """Add markets discovered after the WebSocket connection was opened."""
+        for ticker in tickers:
+            if ticker not in self.tickers:
+                self.tickers.add(ticker)
+                self.books[ticker] = {"yes": {}, "no": {}}
+
     @staticmethod
     def _levels(msg: dict, side: str) -> dict[float, float]:
         values = msg.get(f"{side}_dollars_fp") or msg.get(f"{side}_dollars")
@@ -416,12 +423,12 @@ class MarketState:
                 return [{"record_type": "market_status", **common, "status": status}]
             return []
 
-        if message_type == "market_lifecycle_v2" and ticker in self.tickers:
+        if message_type in {"market_lifecycle_v2", "multivariate_market_lifecycle"} and ticker in self.tickers:
             event_type = msg.get("event_type")
             signature = (
                 event_type, msg.get("result"), msg.get("open_ts"), msg.get("close_ts"),
                 msg.get("determination_ts"), msg.get("settled_ts") or msg.get("settlement_ts"),
-                msg.get("settlement_value"),
+                msg.get("settlement_value_dollars") or msg.get("settlement_value"),
             )
             if self.last_lifecycle.get(ticker) == signature:
                 return []
@@ -437,7 +444,8 @@ class MarketState:
                 "close_ts": msg.get("close_ts"),
                 "determination_ts": msg.get("determination_ts"),
                 "settled_ts": msg.get("settled_ts") or msg.get("settlement_ts"),
-                "settlement_value_dollars": msg.get("settlement_value"),
+                "settlement_value_dollars": msg.get("settlement_value_dollars")
+                or msg.get("settlement_value"),
             }]
 
         if message_type in {"subscribed", "error"}:
