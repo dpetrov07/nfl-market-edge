@@ -15,15 +15,15 @@ import requests
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 
-from collect_live_bovada_ws import (  # noqa: E402
+from scripts.collect_live_bovada_ws import (  # noqa: E402
     fetch_sunday_events,
     selection_rows,
 )
 from collect_live_props import discover, snapshot_rows  # noqa: E402
 from helpers import no_vig  # noqa: E402
-from match_bovada_kalshi_props import normalize_player  # noqa: E402
+from matching import normalize_player  # noqa: E402
 from model import FEATURES, feature_row  # noqa: E402
 
 

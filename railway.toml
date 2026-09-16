@@ -1,7 +1,0 @@
-[build]
-builder = "RAILPACK"
-
-# Set a different start command on each Railway service.
-[deploy]
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10

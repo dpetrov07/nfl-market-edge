@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
-import binascii
 import gzip
 import json
 import os
@@ -19,13 +17,17 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import websockets
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+
+from nfl_market_edge.kalshi import (
+    REST_BASE,
+    WS_URL,
+    auth_headers,
+    load_local_env,
+    load_private_key,
+    utc_now,
+)
 
 
-REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
-WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
-WS_PATH = "/trade-api/ws/v2"
 SERIES = {
     "KXNFLRECYDS": "receiving_yards",
     "KXNFLRSHYDS": "rushing_yards",
@@ -46,40 +48,6 @@ TEAM_CODES = sorted(
 )
 ALIASES = {"JAX": "JAC", "LA": "LAR", "WSH": "WAS"}
 STOP = False
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def load_local_env(path: Path = Path(".env")) -> None:
-    """Load only this collector's settings, including an unquoted multiline PEM."""
-    if not path.exists():
-        return
-    text = path.read_text()
-    keys = (
-        "KALSHI_API_KEY_ID", "KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PEM",
-        "KALSHI_PRIVATE_KEY_B64",
-        "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME", "KALSHI_GAMES", "KALSHI_GAME_DATE",
-        "KALSHI_OUTPUT_DIR", "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS",
-        "KALSHI_TOP_SIZE_CHANGE",
-    )
-    for key in keys:
-        if key in os.environ:
-            continue
-        match = re.search(rf"(?m)^{re.escape(key)}=(.*)$", text)
-        if not match:
-            continue
-        value = match.group(1).strip()
-        if "PRIVATE_KEY" in key and ("-----BEGIN" in value or not value):
-            start = text.find("-----BEGIN", match.start(1))
-            if start >= 0:
-                end = re.search(r"-----END (?:RSA )?PRIVATE KEY-----", text[start:])
-                if end:
-                    value = text[start : start + end.end()].strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        os.environ[key] = value.replace("\\n", "\n")
 
 
 def requested_pair(value: str) -> tuple[str, str]:
@@ -169,42 +137,6 @@ def discover_markets(game: str, date_text: str) -> list[dict]:
     )[:5]
     found = [market for market in found if market["prop_type"] != "spread"] + spreads
     return sorted(found, key=lambda row: row["ticker"])
-
-
-def load_private_key(args: argparse.Namespace):
-    value = os.getenv("KALSHI_PRIVATE_KEY_PEM") or os.getenv("KALSHI_PRIVATE_KEY")
-    if value and "BEGIN" in value:
-        pem_bytes = value.replace("\\n", "\n").encode()
-    else:
-        path = args.private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH") or value
-        if path:
-            pem_bytes = Path(path).expanduser().read_bytes()
-        else:
-            encoded = os.getenv("KALSHI_PRIVATE_KEY_B64")
-            if not encoded:
-                raise SystemExit(
-                    "set KALSHI_PRIVATE_KEY, KALSHI_PRIVATE_KEY_PATH, or KALSHI_PRIVATE_KEY_B64"
-                )
-            try:
-                pem_bytes = base64.b64decode(encoded, validate=True)
-            except (binascii.Error, ValueError) as exc:
-                raise SystemExit("KALSHI_PRIVATE_KEY_B64 is not valid base64") from exc
-    return serialization.load_pem_private_key(pem_bytes, password=None)
-
-
-def auth_headers(key_id: str, private_key) -> dict[str, str]:
-    timestamp = str(int(time.time() * 1000))
-    message = f"{timestamp}GET{WS_PATH}".encode()
-    signature = private_key.sign(
-        message,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
-        hashes.SHA256(),
-    )
-    return {
-        "KALSHI-ACCESS-KEY": key_id,
-        "KALSHI-ACCESS-TIMESTAMP": timestamp,
-        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
-    }
 
 
 class JsonlWriter:

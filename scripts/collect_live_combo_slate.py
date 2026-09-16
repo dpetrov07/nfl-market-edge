@@ -14,15 +14,16 @@ from pathlib import Path
 
 import websockets
 
-from collect_live_kalshi_ws import (
-    MarketState,
+from nfl_market_edge.kalshi import (
+    API_ROOT,
+    KalshiClient,
     WS_URL,
     auth_headers,
     load_local_env,
     load_private_key,
     utc_now,
 )
-from discover_sunday_kalshi_combos import API_ROOT, KalshiClient
+from scripts.collect_live_kalshi_ws import MarketState
 
 
 MARKET_CHANNELS = ("orderbook_delta", "trade", "ticker")

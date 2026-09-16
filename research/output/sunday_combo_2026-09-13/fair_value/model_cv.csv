@@ -1,5 +1,0 @@
-model,features,combos,brier_score,mean_absolute_error
-calibrated_combo_price,yes_price,3629,0.13844408505225336,0.2788248829672395
-calibrated_component_mid,component_mid_product,3629,0.13915698934598394,0.2800296944233988
-combo_plus_component,"yes_price, component_mid_product",3629,0.13846876469086108,0.27884410668740656
-lightweight_features,"yes_price, component_mid_product, leg_count, distinct_leg_games, mean_leg_spread, max_quote_age_seconds",3629,0.1382391830624168,0.27887825206772926

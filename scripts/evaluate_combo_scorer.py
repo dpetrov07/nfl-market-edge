@@ -5,15 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
-
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
-from market_scorer.combo import score_snapshot  # noqa: E402
+from nfl_market_edge.combo import score_snapshot
 
 
 DEFAULT_INPUT = ROOT / "research/output/sunday_combo_2026-09-13/fair_value/quality_fill_values.parquet"

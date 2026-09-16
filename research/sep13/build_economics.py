@@ -13,7 +13,7 @@ from statistics import mean, median
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from combo_fair_value import reconstruct_leg_quotes
+from research.sep13.fair_value import reconstruct_leg_quotes
 
 
 DEFAULT_ROOT = Path("data/sunday_2026-09-13")

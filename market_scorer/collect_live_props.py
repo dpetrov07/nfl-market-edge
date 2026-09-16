@@ -1,4 +1,4 @@
-"""Collect low-frequency live Kalshi NFL receiving/rushing prop snapshots."""
+"""Collect low-frequency live Kalshi props for the side scorer."""
 
 from __future__ import annotations
 

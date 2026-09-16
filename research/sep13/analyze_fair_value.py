@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from combo_fair_value import component_values
-from research_sunday_combo_edges import (
+from research.sep13.fair_value import component_values
+from research.sep13.analyze_edges import (
     BLUE,
     GREEN,
     GRID,

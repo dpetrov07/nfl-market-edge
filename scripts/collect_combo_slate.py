@@ -15,7 +15,8 @@ def bovada_commands(manifest: dict, root: Path, duration: float | None, config: 
         raise ValueError("the current Bovada adapter supports NFL only")
     command = [
         sys.executable,
-        "scripts/collect_live_bovada_ws.py",
+        "-m",
+        "scripts.collect_live_bovada_ws",
         "--date",
         manifest["date"],
         "--output-dir",
@@ -37,7 +38,8 @@ def polling_commands(manifest: dict, root: Path, _duration: float | None, config
         commands.append(
             [
                 sys.executable,
-                "scripts/collect_live_sportsbook_props.py",
+                "-m",
+                "scripts.collect_live_sportsbook_props",
                 "--game",
                 game,
                 "--sport",
@@ -60,7 +62,8 @@ def commands(args: argparse.Namespace, manifest: dict) -> list[list[str]]:
     result = [
         [
             sys.executable,
-            "scripts/collect_live_combo_slate.py",
+            "-m",
+            "scripts.collect_live_combo_slate",
             "--manifest",
             str(args.manifest),
             "--output-dir",

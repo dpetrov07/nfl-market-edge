@@ -7,17 +7,12 @@ import gzip
 import json
 import math
 from pathlib import Path
-import sys
 
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from evaluate_combo_scorer import score_rows, summarize  # noqa: E402
-from market_scorer.combo import fee_per_contract  # noqa: E402
+from nfl_market_edge.combo import fee_per_contract
+from scripts.evaluate_combo_scorer import score_rows, summarize
 
 
 def timestamp(value):

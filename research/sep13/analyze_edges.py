@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from analyze_sunday_combo_economics import DEFAULT_ROOT
+from research.sep13.build_economics import DEFAULT_ROOT
 
 
 DEFAULT_OUTPUT = Path("research/output/sunday_combo_2026-09-13")

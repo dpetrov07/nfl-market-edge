@@ -39,34 +39,6 @@ Launch the local UI:
 streamlit run market_scorer/app.py
 ```
 
-## Combo/RFQ scoring scaffold
-
-`combo.py` accepts a JSON snapshot with a combo YES price and selected-side leg
-books, then reports component fair value, structural seller edge, the frozen
-historical edge prior, quote/tail uncertainty, and `consider`/`watch`/`pass`.
-`consider` still means research shortlist, not an order signal.
-
-```bash
-python market_scorer/combo.py --input combo_snapshot.json
-```
-
-Each `leg_quotes` entry needs `game`, `bid`, `ask`, and `age_seconds`. The scorer
-uses component products only when every leg is from a distinct game; otherwise
-it requires a combo book midpoint or returns no fair value. Component premium
-does not affect selection because it failed the settled-slate validation.
-
-On the current quote-quality subset, the frozen price rule retained 899 combos
-at +3.65¢ equal-combo / +2.93¢ volume-weighted net. Operational quote and
-independence checks retained 885 at +3.76¢ / +2.93¢—effectively the same signal,
-not evidence of model lift.
-
-Evaluate the unchanged scorer on one or more future settled feature files:
-
-```bash
-python scripts/evaluate_combo_scorer.py --input path/to/quality_fill_values.parquet
-```
-
-On future slates, keep the rule frozen and track component/market-price Brier
-scores, realized equal-combo and volume-weighted edge, loss tails, and how much
-the quote-quality checks change coverage. Refit only after there are multiple
-chronologically separate slates for a real forward holdout.
+The combo/RFQ scorer now lives separately in
+[`nfl_market_edge/combo.py`](../nfl_market_edge/combo.py); this directory remains
+the sportsbook/Kalshi player-prop side branch.

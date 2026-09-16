@@ -13,10 +13,7 @@ __pycache__/
 .coverage
 htmlcov/
 model_output/
-
-data
-# Live captures are disposable until explicitly promoted.
-data/live/*
-!data/live/.gitkeep
+data/
+config/combo_slate.json
 kalshi_ws_*.jsonl
 sportsbook_live/

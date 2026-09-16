@@ -5,6 +5,6 @@ builder = "RAILPACK"
 # Useful overrides: SPORTSBOOK_SPORT=nfl|ncaaf, SPORTSBOOK_BOOKS=fanduel,betrivers,
 # SPORTSBOOK_POLL_SECONDS=30, SPORTSBOOK_OUTPUT_DIR or a mounted Railway volume.
 [deploy]
-startCommand = "python scripts/collect_live_sportsbook_props.py"
+startCommand = "python -m scripts.collect_live_sportsbook_props"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

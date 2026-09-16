@@ -68,7 +68,7 @@ def show_table(frame):
     st.dataframe(
         frame,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Kalshi price": st.column_config.NumberColumn(format="%.2f"),
             "Bovada fair %": st.column_config.NumberColumn(format="%.1f%%"),
@@ -87,7 +87,7 @@ def live_page():
     left, right, refresh = st.columns([2, 2, 1])
     game = left.text_input("Game", "DET_BUF").strip().upper()
     game_date = right.date_input("Game date", date.today() + timedelta(days=1))
-    if refresh.button("Refresh", use_container_width=True):
+    if refresh.button("Refresh", width="stretch"):
         fetch_live.clear()
     try:
         with st.spinner("Fetching Kalshi and Bovada…"):

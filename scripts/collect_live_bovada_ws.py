@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo
 import websockets
 from curl_cffi import requests
 
-from collect_live_sportsbook_props import (
+from nfl_market_edge.sportsbook import SCHEMA_VERSION, selection_state_record
+from scripts.collect_live_sportsbook_props import (
     BOVADA_URL,
     bovada_prop_markets,
     bovada_teams,
@@ -28,7 +29,6 @@ from collect_live_sportsbook_props import (
     parse_american,
     parse_float,
 )
-from sportsbook_schema import SCHEMA_VERSION, selection_state_record
 
 
 WS_BASE = "wss://services.bovada.lv/services/sports/subscription"

@@ -2,6 +2,6 @@
 builder = "RAILPACK"
 
 [deploy]
-startCommand = "python scripts/collect_live_kalshi_ws.py"
+startCommand = "python -m scripts.collect_live_kalshi_ws"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
