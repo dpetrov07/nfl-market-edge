@@ -2,9 +2,9 @@
 <title>Component premium and seller edge</title>
 <desc>Seller returns by component-midpoint premium quintile and by premium sign within combo price ranges.</desc>
 <rect width="1120" height="760" fill="white"/>
-<text x="65.0" y="42.0" font-family="Arial, sans-serif" font-size="24" text-anchor="start" font-weight="bold" fill="#20252b">Component premium does not explain seller edge</text>
-<text x="65.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">Equal-combo net P&amp;L; premium = combo price − product of standalone leg midpoints</text>
-<text x="65.0" y="110.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Premium quintiles</text>
+<text x="65.0" y="42.0" font-family="Arial, sans-serif" font-size="24" text-anchor="start" font-weight="bold" fill="#20252b">Standalone leg prices did not reveal a reliable seller edge</text>
+<text x="65.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">Price gap = combo price minus the win chance implied by its standalone legs</text>
+<text x="65.0" y="110.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Combos grouped from lowest to highest price gap</text>
 <line x1="105" y1="347.3" x2="1050" y2="347.3" stroke="#d9dee4"/>
 <text x="93.0" y="351.3" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">-6¢</text>
 <line x1="105" y1="294.2" x2="1050" y2="294.2" stroke="#d9dee4"/>
@@ -17,31 +17,31 @@
 <text x="93.0" y="139.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">+6¢</text>
 <rect x="147.0" y="161.4" width="66" height="79.7" fill="#159b76"/>
 <text x="180.0" y="153.4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#159b76">+4.5¢</text>
-<text x="180.0" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Q1</text>
-<text x="180.0" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">premium -1.29¢</text>
+<text x="180.0" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Lowest</text>
+<text x="180.0" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">mean gap -1.29¢</text>
 <text x="180.0" y="434.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">n=726</text>
 <rect x="345.8" y="216.4" width="66" height="24.7" fill="#159b76"/>
 <text x="378.8" y="208.4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#159b76">+1.4¢</text>
-<text x="378.8" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Q2</text>
-<text x="378.8" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">premium -0.01¢</text>
+<text x="378.8" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Low</text>
+<text x="378.8" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">mean gap -0.01¢</text>
 <text x="378.8" y="434.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">n=726</text>
 <rect x="544.5" y="241.2" width="66" height="17.8" fill="#c44e52"/>
 <text x="577.5" y="277.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#c44e52">-1.0¢</text>
-<text x="577.5" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Q3</text>
-<text x="577.5" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">premium +0.26¢</text>
+<text x="577.5" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Middle</text>
+<text x="577.5" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">mean gap +0.26¢</text>
 <text x="577.5" y="434.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">n=725</text>
 <rect x="743.2" y="241.2" width="66" height="98.7" fill="#c44e52"/>
 <text x="776.2" y="357.9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#c44e52">-5.6¢</text>
-<text x="776.2" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Q4</text>
-<text x="776.2" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">premium +0.53¢</text>
+<text x="776.2" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">High</text>
+<text x="776.2" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">mean gap +0.53¢</text>
 <text x="776.2" y="434.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">n=726</text>
 <rect x="942.0" y="241.2" width="66" height="83.7" fill="#c44e52"/>
 <text x="975.0" y="342.9" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#c44e52">-4.7¢</text>
-<text x="975.0" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Q5</text>
-<text x="975.0" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">premium +1.57¢</text>
+<text x="975.0" y="392.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="bold" fill="#20252b">Highest</text>
+<text x="975.0" y="414.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">mean gap +1.57¢</text>
 <text x="975.0" y="434.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">n=726</text>
 <text x="65.0" y="482.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Within the same combo-price range</text>
-<text x="65.0" y="506.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Negative/zero versus positive midpoint premium</text>
+<text x="65.0" y="506.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Seller profit when the price gap is negative/zero versus positive</text>
 <line x1="105" y1="674.0" x2="1050" y2="674.0" stroke="#d9dee4"/>
 <text x="93.0" y="678.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">-10¢</text>
 <line x1="105" y1="634.0" x2="1050" y2="634.0" stroke="#d9dee4"/>
@@ -71,7 +71,7 @@
 <text x="977.0" y="654.3" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="normal" fill="#d95f02">-5.5</text>
 <text x="950.0" y="720.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="bold" fill="#20252b">50–100¢</text>
 <rect x="105" y="738" width="14" height="14" fill="#159b76"/>
-<text x="127.0" y="750.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">premium ≤ 0</text>
+<text x="127.0" y="750.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">price gap ≤ 0</text>
 <rect x="230" y="738" width="14" height="14" fill="#d95f02"/>
-<text x="252.0" y="750.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">premium &gt; 0</text>
+<text x="252.0" y="750.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#20252b">price gap &gt; 0</text>
 </svg>

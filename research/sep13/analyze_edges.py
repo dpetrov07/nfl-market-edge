@@ -250,8 +250,8 @@ def price_neighborhood_chart(path: Path, buckets: pd.DataFrame):
     left, right = 90, 1120
     xs = np.linspace(left + 70, right - 70, len(data))
     parts = [
-        svg_text(left, 42, "Cross-game YES pricing around the 10¢ candidate", 25, weight="bold"),
-        svg_text(left, 68, "Five-cent execution buckets; each combo is equal-weighted inside a bucket", 14, fill=MUTED),
+        svg_text(left, 42, "How seller profit changed with the combo's price", 25, weight="bold"),
+        svg_text(left, 68, "Cross-game combos grouped by the price paid for YES; each combo counts once", 14, fill=MUTED),
     ]
 
     top_y0, top_y1 = 105, 350
@@ -278,7 +278,7 @@ def price_neighborhood_chart(path: Path, buckets: pd.DataFrame):
         svg_text(left + 60, 97, "observed price", 13),
         f'<line x1="{left+190}" y1="92" x2="{left+222}" y2="92" stroke="{ORANGE}" stroke-width="3"/>',
         svg_text(left + 230, 97, "realized payout", 13),
-        svg_text(left, 395, "Net seller P&L after the existing 7% p(1-p) fee estimate", 18, weight="bold"),
+        svg_text(left, 395, "Average seller profit per contract, after estimated fees", 18, weight="bold"),
     ]
 
     bottom_y0, bottom_y1 = 425, 625
@@ -306,9 +306,9 @@ def price_neighborhood_chart(path: Path, buckets: pd.DataFrame):
         parts.append(svg_text(x, 693, f"{row.contracts/1e6:.2f}m contracts", 12, anchor="middle", fill=MUTED))
     parts += [
         f'<rect x="{left+20}" y="714" width="15" height="15" fill="{GREEN}"/>',
-        svg_text(left + 43, 727, "equal combo", 13),
-        f'<rect x="{left+150}" y="714" width="15" height="15" fill="{BLUE}"/>',
-        svg_text(left + 173, 727, "volume weighted", 13),
+        svg_text(left + 43, 727, "each combo counts once", 13),
+        f'<rect x="{left+230}" y="714" width="15" height="15" fill="{BLUE}"/>',
+        svg_text(left + 253, 727, "weighted by contracts traded", 13),
         svg_text(right, 727, "A combo may appear in multiple buckets if it traded across them.", 12, anchor="end", fill=MUTED),
     ]
     write_svg(
@@ -333,8 +333,8 @@ def structure_chart(path: Path, structures: pd.DataFrame):
     width, height = 1180, 700
     left, right = 285, 1110
     parts = [
-        svg_text(70, 42, "Where the seller edge appears by combo structure", 25, weight="bold"),
-        svg_text(70, 68, "One position per combo at its observed volume-weighted price", 14, fill=MUTED),
+        svg_text(70, 42, "Average seller profit by combo type", 25, weight="bold"),
+        svg_text(70, 68, "Cross-game legs come from different games; same-game legs come from one game", 14, fill=MUTED),
     ]
 
     top, row_gap = 125, 82
@@ -357,11 +357,11 @@ def structure_chart(path: Path, structures: pd.DataFrame):
 
     parts += [
         f'<rect x="{left}" y="480" width="15" height="15" fill="{GREEN}"/>',
-        svg_text(left + 23, 493, "equal combo", 13),
-        f'<rect x="{left+135}" y="480" width="15" height="15" fill="{BLUE}"/>',
-        svg_text(left + 158, 493, "volume weighted", 13),
-        svg_text(70, 535, "Left tail of equal-combo outcomes", 18, weight="bold"),
-        svg_text(70, 560, "5th-percentile net P&L per contract", 13, fill=MUTED),
+        svg_text(left + 23, 493, "each combo counts once", 13),
+        f'<rect x="{left+245}" y="480" width="15" height="15" fill="{BLUE}"/>',
+        svg_text(left + 268, 493, "weighted by contracts traded", 13),
+        svg_text(70, 535, "What the worst 5% of outcomes looked like", 18, weight="bold"),
+        svg_text(70, 560, "Only 5% of combos finished worse than each marker", 13, fill=MUTED),
     ]
     tail_left, tail_right = 355, 1110
     for value in [-80, -60, -40, -20, 0]:
@@ -411,14 +411,14 @@ def candidate_risk_chart(path: Path, positions: pd.DataFrame, games: pd.DataFram
         ]
     parts += [
         svg_text(65, 286, f"Net across 4,864 equal positions: ${summary['equal_position_net']:+.2f} ({summary['equal_combo_net_per_contract']*100:+.2f}¢ each)", 15, weight="bold"),
-        svg_text(65, 314, f"5th percentile {summary['p05_net_per_contract']*100:+.2f}¢ · worst {summary['worst_net_per_contract']*100:+.2f}¢", 14, fill=MUTED),
+        svg_text(65, 314, f"95% earned at least {summary['p05_net_per_contract']*100:+.2f}¢ · worst result {summary['worst_net_per_contract']*100:+.2f}¢", 14, fill=MUTED),
         svg_text(65, 350, "Observed-volume concentration", 18, weight="bold"),
         svg_text(65, 382, f"Top 1 / 10 / 100 combos: {summary['top_1_combo_volume_share']:.1%} / {summary['top_10_combo_volume_share']:.1%} / {summary['top_100_combo_volume_share']:.1%} of contracts", 14),
         svg_text(65, 408, f"Only {summary['loss_combo_volume_share']:.1%} of observed contracts sat in losing combos; volume-weighted results are therefore fragile.", 13, fill=MUTED),
         svg_text(65, 458, "Underlying overlap", 18, weight="bold"),
         svg_text(65, 488, f"{summary['unique_directional_legs']:,} unique directional legs across {summary['directional_leg_slots']:,} leg slots", 14),
         svg_text(65, 515, f"Largest repeated leg: {summary['max_directional_leg']} ({summary['max_directional_leg_share']:.1%} of combos)", 13, fill=MUTED),
-        svg_text(65, 565, "Tail interpretation", 18, weight="bold"),
+        svg_text(65, 565, "Why the losses matter", 18, weight="bold"),
         svg_text(65, 597, "A typical win earns about 5¢; a settled-YES loss costs about 93¢.", 14),
         svg_text(65, 623, "The one-slate average is positive because only 159 of 4,864 positions lost.", 13, fill=MUTED),
         svg_text(625, 115, "Game exposure", 18, weight="bold"),

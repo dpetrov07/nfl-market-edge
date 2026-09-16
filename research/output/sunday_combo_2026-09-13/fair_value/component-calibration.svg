@@ -1,80 +1,81 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="760" viewBox="0 0 920 760">
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="790" viewBox="0 0 920 790">
 <title>Combo and component calibration</title>
 <desc>Calibration of combo trade prices and products of timestamp-matched standalone leg midpoints against realized settlements.</desc>
-<rect width="920" height="760" fill="white"/>
-<text x="65.0" y="42.0" font-family="Arial, sans-serif" font-size="24" text-anchor="start" font-weight="bold" fill="#20252b">Combo price is at least as informative as the leg product</text>
-<text x="65.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">Cross-game combos with component quotes ≤30s old and leg spreads ≤5¢</text>
-<line x1="105.0" y1="100" x2="105.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="660.0" x2="850" y2="660.0" stroke="#d9dee4"/>
-<text x="105.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.0</text>
-<text x="92.0" y="664.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.0</text>
-<line x1="179.5" y1="100" x2="179.5" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="604.0" x2="850" y2="604.0" stroke="#d9dee4"/>
-<text x="179.5" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.1</text>
-<text x="92.0" y="608.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.1</text>
-<line x1="254.0" y1="100" x2="254.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="548.0" x2="850" y2="548.0" stroke="#d9dee4"/>
-<text x="254.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.2</text>
-<text x="92.0" y="552.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.2</text>
-<line x1="328.5" y1="100" x2="328.5" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="492.0" x2="850" y2="492.0" stroke="#d9dee4"/>
-<text x="328.5" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.3</text>
-<text x="92.0" y="496.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.3</text>
-<line x1="403.0" y1="100" x2="403.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="436.0" x2="850" y2="436.0" stroke="#d9dee4"/>
-<text x="403.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.4</text>
-<text x="92.0" y="440.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.4</text>
-<line x1="477.5" y1="100" x2="477.5" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="380.0" x2="850" y2="380.0" stroke="#d9dee4"/>
-<text x="477.5" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.5</text>
-<text x="92.0" y="384.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.5</text>
-<line x1="552.0" y1="100" x2="552.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="324.0" x2="850" y2="324.0" stroke="#d9dee4"/>
-<text x="552.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.6</text>
-<text x="92.0" y="328.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.6</text>
-<line x1="626.5" y1="100" x2="626.5" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="268.0" x2="850" y2="268.0" stroke="#d9dee4"/>
-<text x="626.5" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.7</text>
-<text x="92.0" y="272.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.7</text>
-<line x1="701.0" y1="100" x2="701.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="212.0" x2="850" y2="212.0" stroke="#d9dee4"/>
-<text x="701.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.8</text>
-<text x="92.0" y="216.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.8</text>
-<line x1="775.5" y1="100" x2="775.5" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="156.0" x2="850" y2="156.0" stroke="#d9dee4"/>
-<text x="775.5" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.9</text>
-<text x="92.0" y="160.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.9</text>
-<line x1="850.0" y1="100" x2="850.0" y2="660" stroke="#d9dee4"/>
-<line x1="105" y1="100.0" x2="850" y2="100.0" stroke="#d9dee4"/>
-<text x="850.0" y="685.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">1.0</text>
-<text x="92.0" y="104.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">1.0</text>
-<line x1="105" y1="660" x2="850" y2="100" stroke="#20252b" stroke-width="2" stroke-dasharray="6 5"/>
-<polyline points="143.9,654.7 214.6,594.2 290.2,520.8 359.3,422.1 435.8,349.8 508.1,293.8 581.7,286.7 661.5,352.0 729.8,260.0 814.6,100.0" fill="none" stroke="#1677b3" stroke-width="3"/>
-<circle cx="143.9" cy="654.7" r="6" fill="#1677b3"/>
-<circle cx="214.6" cy="594.2" r="6" fill="#1677b3"/>
-<circle cx="290.2" cy="520.8" r="6" fill="#1677b3"/>
-<circle cx="359.3" cy="422.1" r="6" fill="#1677b3"/>
-<circle cx="435.8" cy="349.8" r="6" fill="#1677b3"/>
-<circle cx="508.1" cy="293.8" r="6" fill="#1677b3"/>
-<circle cx="581.7" cy="286.7" r="6" fill="#1677b3"/>
-<circle cx="661.5" cy="352.0" r="6" fill="#1677b3"/>
-<circle cx="729.8" cy="260.0" r="6" fill="#1677b3"/>
-<circle cx="814.6" cy="100.0" r="6" fill="#1677b3"/>
-<polyline points="145.1,653.1 214.3,594.6 289.7,513.2 358.0,427.4 435.7,349.8 508.0,277.1 583.5,330.6 657.9,365.3 744.0,180.0 826.4,100.0" fill="none" stroke="#d95f02" stroke-width="3"/>
-<circle cx="145.1" cy="653.1" r="5" fill="#d95f02"/>
-<circle cx="214.3" cy="594.6" r="5" fill="#d95f02"/>
-<circle cx="289.7" cy="513.2" r="5" fill="#d95f02"/>
-<circle cx="358.0" cy="427.4" r="5" fill="#d95f02"/>
-<circle cx="435.7" cy="349.8" r="5" fill="#d95f02"/>
-<circle cx="508.0" cy="277.1" r="5" fill="#d95f02"/>
-<circle cx="583.5" cy="330.6" r="5" fill="#d95f02"/>
-<circle cx="657.9" cy="365.3" r="5" fill="#d95f02"/>
-<circle cx="744.0" cy="180.0" r="5" fill="#d95f02"/>
-<circle cx="826.4" cy="100.0" r="5" fill="#d95f02"/>
-<text x="477.5" y="716.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="normal" fill="#20252b">Mean forecast probability</text>
-<text x="28" y="380.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#20252b" transform="rotate(-90 28 380.0)">Realized settlement</text>
-<line x1="125" y1="87" x2="157" y2="87" stroke="#1677b3" stroke-width="3"/>
-<text x="165.0" y="92.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">combo price · Brier 0.13967</text>
-<line x1="360" y1="87" x2="392" y2="87" stroke="#d95f02" stroke-width="3"/>
-<text x="400.0" y="92.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">component midpoint · Brier 0.14032</text>
+<rect width="920" height="790" fill="white"/>
+<text x="65.0" y="42.0" font-family="Arial, sans-serif" font-size="24" text-anchor="start" font-weight="bold" fill="#20252b">Standalone leg prices did not improve win predictions</text>
+<text x="65.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">Each point compares predicted win chance with actual win rate; dashed line = perfect</text>
+<line x1="105.0" y1="125" x2="105.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="675.0" x2="850" y2="675.0" stroke="#d9dee4"/>
+<text x="105.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.0</text>
+<text x="92.0" y="679.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.0</text>
+<line x1="179.5" y1="125" x2="179.5" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="620.0" x2="850" y2="620.0" stroke="#d9dee4"/>
+<text x="179.5" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.1</text>
+<text x="92.0" y="624.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.1</text>
+<line x1="254.0" y1="125" x2="254.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="565.0" x2="850" y2="565.0" stroke="#d9dee4"/>
+<text x="254.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.2</text>
+<text x="92.0" y="569.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.2</text>
+<line x1="328.5" y1="125" x2="328.5" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="510.0" x2="850" y2="510.0" stroke="#d9dee4"/>
+<text x="328.5" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.3</text>
+<text x="92.0" y="514.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.3</text>
+<line x1="403.0" y1="125" x2="403.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="455.0" x2="850" y2="455.0" stroke="#d9dee4"/>
+<text x="403.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.4</text>
+<text x="92.0" y="459.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.4</text>
+<line x1="477.5" y1="125" x2="477.5" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="400.0" x2="850" y2="400.0" stroke="#d9dee4"/>
+<text x="477.5" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.5</text>
+<text x="92.0" y="404.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.5</text>
+<line x1="552.0" y1="125" x2="552.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="345.0" x2="850" y2="345.0" stroke="#d9dee4"/>
+<text x="552.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.6</text>
+<text x="92.0" y="349.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.6</text>
+<line x1="626.5" y1="125" x2="626.5" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="290.0" x2="850" y2="290.0" stroke="#d9dee4"/>
+<text x="626.5" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.7</text>
+<text x="92.0" y="294.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.7</text>
+<line x1="701.0" y1="125" x2="701.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="235.0" x2="850" y2="235.0" stroke="#d9dee4"/>
+<text x="701.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.8</text>
+<text x="92.0" y="239.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.8</text>
+<line x1="775.5" y1="125" x2="775.5" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="180.0" x2="850" y2="180.0" stroke="#d9dee4"/>
+<text x="775.5" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">0.9</text>
+<text x="92.0" y="184.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">0.9</text>
+<line x1="850.0" y1="125" x2="850.0" y2="675" stroke="#d9dee4"/>
+<line x1="105" y1="125.0" x2="850" y2="125.0" stroke="#d9dee4"/>
+<text x="850.0" y="700.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">1.0</text>
+<text x="92.0" y="129.0" font-family="Arial, sans-serif" font-size="12" text-anchor="end" font-weight="normal" fill="#68717c">1.0</text>
+<line x1="105" y1="675" x2="850" y2="125" stroke="#20252b" stroke-width="2" stroke-dasharray="6 5"/>
+<polyline points="143.9,669.8 214.6,610.4 290.2,538.3 359.3,441.4 435.8,370.3 508.1,315.4 581.7,308.3 661.5,372.5 729.8,282.1 814.6,125.0" fill="none" stroke="#1677b3" stroke-width="3"/>
+<circle cx="143.9" cy="669.8" r="6" fill="#1677b3"/>
+<circle cx="214.6" cy="610.4" r="6" fill="#1677b3"/>
+<circle cx="290.2" cy="538.3" r="6" fill="#1677b3"/>
+<circle cx="359.3" cy="441.4" r="6" fill="#1677b3"/>
+<circle cx="435.8" cy="370.3" r="6" fill="#1677b3"/>
+<circle cx="508.1" cy="315.4" r="6" fill="#1677b3"/>
+<circle cx="581.7" cy="308.3" r="6" fill="#1677b3"/>
+<circle cx="661.5" cy="372.5" r="6" fill="#1677b3"/>
+<circle cx="729.8" cy="282.1" r="6" fill="#1677b3"/>
+<circle cx="814.6" cy="125.0" r="6" fill="#1677b3"/>
+<polyline points="145.1,668.2 214.3,610.8 289.7,530.8 358.0,446.6 435.7,370.3 508.0,299.0 583.5,351.5 657.9,385.5 744.0,203.6 826.4,125.0" fill="none" stroke="#d95f02" stroke-width="3"/>
+<circle cx="145.1" cy="668.2" r="5" fill="#d95f02"/>
+<circle cx="214.3" cy="610.8" r="5" fill="#d95f02"/>
+<circle cx="289.7" cy="530.8" r="5" fill="#d95f02"/>
+<circle cx="358.0" cy="446.6" r="5" fill="#d95f02"/>
+<circle cx="435.7" cy="370.3" r="5" fill="#d95f02"/>
+<circle cx="508.0" cy="299.0" r="5" fill="#d95f02"/>
+<circle cx="583.5" cy="351.5" r="5" fill="#d95f02"/>
+<circle cx="657.9" cy="385.5" r="5" fill="#d95f02"/>
+<circle cx="744.0" cy="203.6" r="5" fill="#d95f02"/>
+<circle cx="826.4" cy="125.0" r="5" fill="#d95f02"/>
+<text x="477.5" y="728.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" font-weight="normal" fill="#20252b">Predicted chance the combo settles YES</text>
+<text x="28" y="400.0" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#20252b" transform="rotate(-90 28 400.0)">Actual share that settled YES</text>
+<line x1="125" y1="101" x2="157" y2="101" stroke="#1677b3" stroke-width="3"/>
+<text x="165.0" y="106.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">combo price · error 0.13967</text>
+<line x1="360" y1="101" x2="392" y2="101" stroke="#d95f02" stroke-width="3"/>
+<text x="400.0" y="106.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">standalone legs · error 0.14032</text>
+<text x="477.5" y="765.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">Brier error: 0 is perfect and lower is better; these two scores are nearly identical</text>
 </svg>

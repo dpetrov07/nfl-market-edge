@@ -287,13 +287,13 @@ def cross_validated_models(quality: pd.DataFrame):
 
 
 def calibration_chart(path: Path, calibration: pd.DataFrame, forecasts: pd.DataFrame):
-    width, height = 920, 760
-    left, right, top, bottom = 105, 850, 100, 660
+    width, height = 920, 790
+    left, right, top, bottom = 105, 850, 125, 675
     scale_x = lambda value: left + value * (right - left)
     scale_y = lambda value: bottom - value * (bottom - top)
     parts = [
-        svg_text(65, 42, "Combo price is at least as informative as the leg product", 24, weight="bold"),
-        svg_text(65, 68, "Cross-game combos with component quotes ≤30s old and leg spreads ≤5¢", 14, fill=MUTED),
+        svg_text(65, 42, "Standalone leg prices did not improve win predictions", 24, weight="bold"),
+        svg_text(65, 68, "Each point compares predicted win chance with actual win rate; dashed line = perfect", 14, fill=MUTED),
     ]
     for value in np.arange(0, 1.01, 0.1):
         x, y = scale_x(value), scale_y(value)
@@ -320,12 +320,13 @@ def calibration_chart(path: Path, calibration: pd.DataFrame, forecasts: pd.DataF
     combo_brier = metrics.loc["combo_trade_price", "brier_score"]
     mid_brier = metrics.loc["component_mid_product", "brier_score"]
     parts += [
-        svg_text((left + right) / 2, 716, "Mean forecast probability", 14, anchor="middle"),
-        f'<text x="28" y="{(top + bottom) / 2:.1f}" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="{INK}" transform="rotate(-90 28 {(top + bottom) / 2:.1f})">Realized settlement</text>',
-        f'<line x1="{left+20}" y1="87" x2="{left+52}" y2="87" stroke="{BLUE}" stroke-width="3"/>',
-        svg_text(left + 60, 92, f"combo price · Brier {combo_brier:.5f}", 13),
-        f'<line x1="{left+255}" y1="87" x2="{left+287}" y2="87" stroke="{ORANGE}" stroke-width="3"/>',
-        svg_text(left + 295, 92, f"component midpoint · Brier {mid_brier:.5f}", 13),
+        svg_text((left + right) / 2, 728, "Predicted chance the combo settles YES", 14, anchor="middle"),
+        f'<text x="28" y="{(top + bottom) / 2:.1f}" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="{INK}" transform="rotate(-90 28 {(top + bottom) / 2:.1f})">Actual share that settled YES</text>',
+        f'<line x1="{left+20}" y1="101" x2="{left+52}" y2="101" stroke="{BLUE}" stroke-width="3"/>',
+        svg_text(left + 60, 106, f"combo price · error {combo_brier:.5f}", 13),
+        f'<line x1="{left+255}" y1="101" x2="{left+287}" y2="101" stroke="{ORANGE}" stroke-width="3"/>',
+        svg_text(left + 295, 106, f"standalone legs · error {mid_brier:.5f}", 13),
+        svg_text((left + right) / 2, 765, "Brier error: 0 is perfect and lower is better; these two scores are nearly identical", 13, anchor="middle", fill=MUTED),
     ]
     write_svg(
         path,
@@ -341,9 +342,9 @@ def premium_chart(path: Path, quintiles: pd.DataFrame, price_cells: pd.DataFrame
     width, height = 1120, 760
     left, right = 105, 1050
     parts = [
-        svg_text(65, 42, "Component premium does not explain seller edge", 24, weight="bold"),
-        svg_text(65, 68, "Equal-combo net P&L; premium = combo price − product of standalone leg midpoints", 14, fill=MUTED),
-        svg_text(65, 110, "Premium quintiles", 18, weight="bold"),
+        svg_text(65, 42, "Standalone leg prices did not reveal a reliable seller edge", 24, weight="bold"),
+        svg_text(65, 68, "Price gap = combo price minus the win chance implied by its standalone legs", 14, fill=MUTED),
+        svg_text(65, 110, "Combos grouped from lowest to highest price gap", 18, weight="bold"),
     ]
     xs = np.linspace(left + 75, right - 75, len(quintiles))
     top, bottom, ymin, ymax = 135, 365, -7, 6
@@ -362,13 +363,13 @@ def premium_chart(path: Path, quintiles: pd.DataFrame, price_cells: pd.DataFrame
         parts += [
             f'<rect x="{x-33:.1f}" y="{min(y,zero):.1f}" width="66" height="{abs(zero-y):.1f}" fill="{color}"/>',
             svg_text(x, y - 8 if value >= 0 else y + 18, f"{value:+.1f}¢", 13, anchor="middle", fill=color),
-            svg_text(x, 392, f"Q{int(row.premium_quintile)}", 14, anchor="middle", weight="bold"),
-            svg_text(x, 414, f"premium {row.mean_premium*100:+.2f}¢", 12, anchor="middle", fill=MUTED),
+            svg_text(x, 392, ["Lowest", "Low", "Middle", "High", "Highest"][int(row.premium_quintile) - 1], 14, anchor="middle", weight="bold"),
+            svg_text(x, 414, f"mean gap {row.mean_premium*100:+.2f}¢", 12, anchor="middle", fill=MUTED),
             svg_text(x, 434, f"n={int(row.combos):,}", 12, anchor="middle", fill=MUTED),
         ]
     parts += [
         svg_text(65, 482, "Within the same combo-price range", 18, weight="bold"),
-        svg_text(65, 506, "Negative/zero versus positive midpoint premium", 13, fill=MUTED),
+        svg_text(65, 506, "Seller profit when the price gap is negative/zero versus positive", 13, fill=MUTED),
     ]
     buckets = ["0–10¢", "10–25¢", "25–50¢", "50–100¢"]
     xs = np.linspace(left + 100, right - 100, len(buckets))
@@ -394,9 +395,9 @@ def premium_chart(path: Path, quintiles: pd.DataFrame, price_cells: pd.DataFrame
         parts.append(svg_text(x, 720, bucket, 13, anchor="middle", weight="bold"))
     parts += [
         f'<rect x="{left}" y="738" width="14" height="14" fill="{GREEN}"/>',
-        svg_text(left + 22, 750, "premium ≤ 0", 12),
+        svg_text(left + 22, 750, "price gap ≤ 0", 12),
         f'<rect x="{left+125}" y="738" width="14" height="14" fill="{ORANGE}"/>',
-        svg_text(left + 147, 750, "premium > 0", 12),
+        svg_text(left + 147, 750, "price gap > 0", 12),
     ]
     write_svg(
         path,

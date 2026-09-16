@@ -16,14 +16,14 @@
 <text x="309.0" y="198.0" font-family="Arial, sans-serif" font-size="15" text-anchor="start" font-weight="normal" fill="#c44e52">mean -92.70¢</text>
 <text x="309.0" y="225.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">equal-position sum -$147.39</text>
 <text x="65.0" y="286.0" font-family="Arial, sans-serif" font-size="15" text-anchor="start" font-weight="bold" fill="#20252b">Net across 4,864 equal positions: $+85.89 (+1.77¢ each)</text>
-<text x="65.0" y="314.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">5th percentile +0.46¢ · worst -98.88¢</text>
+<text x="65.0" y="314.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">95% earned at least +0.46¢ · worst result -98.88¢</text>
 <text x="65.0" y="350.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Observed-volume concentration</text>
 <text x="65.0" y="382.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">Top 1 / 10 / 100 combos: 3.7% / 18.8% / 57.1% of contracts</text>
 <text x="65.0" y="408.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Only 2.1% of observed contracts sat in losing combos; volume-weighted results are therefore fragile.</text>
 <text x="65.0" y="458.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Underlying overlap</text>
 <text x="65.0" y="488.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">1,350 unique directional legs across 13,407 leg slots</text>
 <text x="65.0" y="515.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Largest repeated leg: Tampa Bay | moneyline | YES (7.0% of combos)</text>
-<text x="65.0" y="565.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Tail interpretation</text>
+<text x="65.0" y="565.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Why the losses matter</text>
 <text x="65.0" y="597.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#20252b">A typical win earns about 5¢; a settled-YES loss costs about 93¢.</text>
 <text x="65.0" y="623.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">The one-slate average is positive because only 159 of 4,864 positions lost.</text>
 <text x="625.0" y="115.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Game exposure</text>

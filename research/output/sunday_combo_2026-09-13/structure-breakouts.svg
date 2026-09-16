@@ -2,8 +2,8 @@
 <title>Seller edge by combo structure</title>
 <desc>Equal-combo and volume-weighted seller returns plus fifth-percentile downside for same-game and cross-game two- and three-leg combos.</desc>
 <rect width="1180" height="700" fill="white"/>
-<text x="70.0" y="42.0" font-family="Arial, sans-serif" font-size="25" text-anchor="start" font-weight="bold" fill="#20252b">Where the seller edge appears by combo structure</text>
-<text x="70.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">One position per combo at its observed volume-weighted price</text>
+<text x="70.0" y="42.0" font-family="Arial, sans-serif" font-size="25" text-anchor="start" font-weight="bold" fill="#20252b">Average seller profit by combo type</text>
+<text x="70.0" y="68.0" font-family="Arial, sans-serif" font-size="14" text-anchor="start" font-weight="normal" fill="#68717c">Cross-game legs come from different games; same-game legs come from one game</text>
 <line x1="285.0" y1="95" x2="285.0" y2="430" stroke="#d9dee4"/>
 <text x="285.0" y="450.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" font-weight="normal" fill="#68717c">-2¢</text>
 <line x1="468.3" y1="95" x2="468.3" y2="430" stroke="#20252b"/>
@@ -39,11 +39,11 @@
 <text x="720.5" y="388.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="normal" fill="#1677b3">+2.67¢</text>
 <text x="267.0" y="400.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="normal" fill="#68717c">n=3,497 · 1.10m contracts · YES settled 19.2%</text>
 <rect x="285" y="480" width="15" height="15" fill="#159b76"/>
-<text x="308.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">equal combo</text>
-<rect x="420" y="480" width="15" height="15" fill="#1677b3"/>
-<text x="443.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">volume weighted</text>
-<text x="70.0" y="535.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">Left tail of equal-combo outcomes</text>
-<text x="70.0" y="560.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">5th-percentile net P&amp;L per contract</text>
+<text x="308.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">each combo counts once</text>
+<rect x="530" y="480" width="15" height="15" fill="#1677b3"/>
+<text x="553.0" y="493.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#20252b">weighted by contracts traded</text>
+<text x="70.0" y="535.0" font-family="Arial, sans-serif" font-size="18" text-anchor="start" font-weight="bold" fill="#20252b">What the worst 5% of outcomes looked like</text>
+<text x="70.0" y="560.0" font-family="Arial, sans-serif" font-size="13" text-anchor="start" font-weight="normal" fill="#68717c">Only 5% of combos finished worse than each marker</text>
 <line x1="399.4" y1="572" x2="399.4" y2="658" stroke="#d9dee4"/>
 <text x="399.4" y="681.0" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" font-weight="normal" fill="#68717c">-80¢</text>
 <line x1="577.1" y1="572" x2="577.1" y2="658" stroke="#d9dee4"/>

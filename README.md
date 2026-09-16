@@ -1,13 +1,73 @@
 # NFL Market Edge
 
-This repo captures prospective Kalshi combo slates and sportsbook player props,
-then evaluates settled cross-game combos with the frozen Sep 13 scorer. The
-current workflow is collection first, evaluation after settlement; nothing here
-submits orders.
+Research and collection tools for Kalshi NFL combo markets. The current work
+asks a narrow question: did selling very cheap cross-game YES combos show an
+edge on the settled September 13, 2026 slate? Nothing in this repo submits
+orders, and one slate is not enough to establish a live strategy.
 
-## Current workflow
+## What the research found
 
-Create an environment and install the direct dependencies:
+A **cross-game combo** joins player props from different games; every leg must
+win for the combo to settle YES. Results are viewed from the YES seller's side:
+the seller keeps the sale price when the combo loses, but owes $1 when it wins.
+All reported profit figures include the existing fee estimate.
+
+The clearest result was in cross-game combos sold below 10¢:
+
+- 4,864 unique combos averaged **+1.77¢ per contract** when every combo counted
+  once, or **+1.19¢** when weighted by the number of contracts traded.
+- 4,705 combos made about **+4.96¢** each, while 159 losing combos lost about
+  **92.70¢** each. The average was positive, but the occasional loss was roughly
+  19 times a typical win.
+- The 100 most-traded combos supplied 57.1% of all volume, so the
+  volume-weighted result depended heavily on a small part of the slate.
+- Reconstructing a combo's probability from its standalone legs did not improve
+  prediction or produce a better selection rule.
+
+## Reading the charts
+
+![Cross-game prices and seller profit by price bucket](research/output/sunday_combo_2026-09-13/price-neighborhood.svg)
+
+The top compares the price paid for each YES combo with the share that actually
+settled YES. The bottom shows the seller's average profit. The result was not
+unique to the under-10¢ group, but that group is the frozen candidate rule used
+for prospective evaluation.
+
+![Seller profit and downside by combo type](research/output/sunday_combo_2026-09-13/structure-breakouts.svg)
+
+The lower panel describes the **worst 5% of outcomes**. For example, -74¢ means 
+only about 5% of that combo type finished worse than a 74¢ loss per contract. 
+This is the downside hidden by a positive average.
+
+![Risk and concentration of the under-10-cent group](research/output/sunday_combo_2026-09-13/candidate-risk-exposure.svg)
+
+This makes the asymmetry explicit: most positions earned a few cents, while a
+small number lost nearly the full dollar. It also shows how often the same legs
+and games appeared across combos, so these were overlapping bets rather than
+4,864 independent observations.
+
+![Calibration of combo prices and standalone-leg estimates](research/output/sunday_combo_2026-09-13/fair_value/component-calibration.svg)
+
+The horizontal axis is the predicted chance of a YES settlement; the vertical 
+axis is the share that actually settled YES. Points near the diagonal are better. 
+A Brier score is the average squared prediction error, so lower is better: 0.13967 
+for the combo price versus 0.14032 for the standalone-leg estimate. Those scores 
+are nearly identical, with the combo price slightly better on this sample.
+
+![Standalone-leg pricing versus seller profit](research/output/sunday_combo_2026-09-13/fair_value/premium-signal.svg)
+
+This groups combos by how far their traded price sat above or below the
+probability implied by their standalone legs. Seller profit does not improve
+consistently as that gap grows, so the leg-price comparison did not add a useful
+signal beyond the combo's own price.
+
+These are descriptive findings from one settled Sunday with many correlated
+positions—not an out-of-sample strategy test. Full methodology, caveats, and
+reproduction commands are in [`research/sep13/README.md`](research/sep13/README.md).
+
+## Prospective workflow
+
+Create an environment and install dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -15,8 +75,8 @@ python3 -m venv .venv
 ```
 
 Copy [`config/combo_slate.example.json`](config/combo_slate.example.json), set
-the slate ID and exact Kalshi event tickers, then launch the configured Kalshi
-and sportsbook collectors together:
+the slate ID and Kalshi event tickers, then start the Kalshi, Bovada, FanDuel,
+and BetRivers collectors:
 
 ```bash
 cp config/combo_slate.example.json config/combo_slate.json
@@ -24,169 +84,28 @@ cp config/combo_slate.example.json config/combo_slate.json
   --manifest config/combo_slate.json
 ```
 
-The local runner starts four independent workers: Kalshi, Bovada, FanDuel, and
-BetRivers. The capture lands under `data/live/combo_slates/<slate_id>/`. Keep
-Kalshi running through settlement so the evaluator sees lifecycle results. Then
-run:
+Keep Kalshi running through settlement, then evaluate the captured slate:
 
 ```bash
 .venv/bin/python -m scripts.evaluate_prospective_combo_slate \
   --manifest config/combo_slate.json
 ```
 
-Evaluation writes matched fill features, scorer decisions, and the fixed-rule
-summary to `research/output/<slate_id>/prospective/`.
+Captures land under `data/live/combo_slates/<slate_id>/`; evaluation results go
+to `research/output/<slate_id>/prospective/`. The frozen shortlist remains the
+historical rule—cross-game YES trades strictly below 10¢—rather than a
+calibrated model or order signal.
 
-## Sportsbook scorer side branch
-
-The Bovada-to-Kalshi player-prop scorer and Streamlit UI are still preserved in
-[`market_scorer/`](market_scorer/README.md) for continued work. They are
-independent of the combo scorer and remain read-only.
-
-```bash
-# Historical rankings
-.venv/bin/python market_scorer/rank.py --latest-only --top 10
-
-# Live shadow score
-.venv/bin/python market_scorer/live.py --game DET_BUF --date 2026-09-17
-
-# Live/replay UI
-.venv/bin/streamlit run market_scorer/app.py
-```
-
-The UI uses the frozen models under the git-ignored `model_output/`. Rebuild
-them from the preserved Sep 13 data with:
-
-```bash
-.venv/bin/python market_scorer/model.py
-.venv/bin/python market_scorer/train_v2.py
-```
-
-## Frozen combo scorer
-
-[`nfl_market_edge/combo.py`](nfl_market_edge/combo.py) is the reusable scorer.
-Its shortlist remains exactly the settled Sep 13 rule: cross-game YES trades
-strictly below 10¢. Component or combo books affect the fair-value diagnostic
-and operational `consider`/`watch` label, but do not replace that historical
-rule.
-
-Score one JSON snapshot from a file or stdin:
-
-```bash
-.venv/bin/python -m nfl_market_edge.combo --input combo_snapshot.json
-```
-
-The historical prior is intentionally low-confidence and is not a calibrated
-model or an order signal.
-
-## Collectors
-
-The prospective pipeline is deliberately narrow:
-
-- Kalshi records cross-game 2/3-leg combo discovery, RFQs/quotes, combo fills,
-  combo books, component books, and lifecycle/settlement. It does not subscribe
-  to standalone component trades.
-- Bovada, FanDuel, and BetRivers each run independently and write the same
-  per-selection sportsbook schema with local receive time, source time when
-  available, a shared wall-clock snapshot bucket, slate/game IDs,
-  player/prop/line/side, odds, and source IDs.
-
-Individual worker entry points:
-
-```bash
-# Kalshi combo/RFQ slate capture
-.venv/bin/python -m scripts.collect_live_combo_slate --help
-
-# One normalized sportsbook source per process
-.venv/bin/python -m scripts.collect_live_sportsbook_props --help
-```
-
-All sportsbook adapters emit the selection-state contract in
-[`nfl_market_edge/sportsbook.py`](nfl_market_edge/sportsbook.py). Shared Kalshi
-authentication and REST access live in
-[`nfl_market_edge/kalshi.py`](nfl_market_edge/kalshi.py).
-
-### Railway
-
-Create four Railway worker services from this repo and point each service at its
-config file:
-
-| Service | Config | Start command |
-|---|---|---|
-| Kalshi | `railway.kalshi.toml` | `scripts.collect_live_combo_slate` |
-| Bovada | `railway.bovada.toml` | sportsbook worker with `--book bovada` |
-| FanDuel | `railway.fanduel.toml` | sportsbook worker with `--book fanduel` |
-| BetRivers | `railway.betrivers.toml` | sportsbook worker with `--book betrivers` |
-
-Attach a persistent volume to each service. Kalshi needs
-`SLATE_MANIFEST_JSON`, `KALSHI_API_KEY_ID`, and a private-key variable. Each
-sportsbook needs `SLATE_ID`, `SPORTSBOOK_SPORT=nfl|ncaaf`, and comma-separated
-`SPORTSBOOK_GAMES`. See
+The independent sportsbook-to-Kalshi player-prop scorer and Streamlit UI remain
+documented in [`market_scorer/`](market_scorer/README.md). Railway worker configs
+are in `railway.*.toml`, with environment examples in
 [`config/railway.env.example`](config/railway.env.example).
-
-Each worker emits structured `collector_status` JSON to Railway logs and keeps
-its latest status in `health.json`. `ok` means props were collected, `empty`
-means the source responded but has not posted matching props, `partial` means
-some games failed, and `error` means the poll failed. Kalshi reports `starting`,
-`ready`, `connected`, periodic `heartbeat`, reconnects, sequence gaps, and
-lifecycle/settlement messages. Its heartbeat also reports whether authenticated
-fill access is available and how many matching account fills were retained.
-
-The common layout is:
-
-```text
-combo_slates/<slate_id>/
-  kalshi/events.jsonl.gz
-  kalshi/health.json
-  sportsbooks/bovada/{nfl|ncaaf}_props_<utc-date>.jsonl.gz
-  sportsbooks/bovada/health.json
-  sportsbooks/fanduel/...
-  sportsbooks/betrivers/...
-```
-
-Manifest event tickers are matched by their dated game suffix, so one event
-ticker per game is enough even when component legs come from different Kalshi
-series. Optional `combo_tickers` seed already-open combos after a restart; new
-ones are discovered from RFQs and multivariate lifecycle messages.
 
 ## Repo map
 
-- `nfl_market_edge/`: frozen scoring and shared collection primitives
-- `market_scorer/`: sportsbook/Kalshi player-prop scorer and Streamlit UI
-- `scripts/`: current collectors, slate runner, and evaluators
-- `config/`: prospective slate manifest example
-- `research/sep13/`: reproducible historical analysis code and findings
-- `research/output/`: preserved benchmark results and future slate evaluations
-- `data/`: local captures and derived Parquet; live captures are git-ignored
-- `railway.*.toml`: collector service entry points
-
-## Sep 13 benchmark
-
-The preserved study remains the source of the frozen prior: 4,864 cross-game
-combos below 10¢ returned +1.77¢ per equal-weighted combo and +1.19¢ when
-weighted by observed volume, with a 3.27% losing-combo rate and severe loss
-tails. Component midpoint products did not improve selection on that slate.
-
-- Cross-game 2-leg and 3-leg combos returned +3.11¢ and +4.40¢ net per equal
-  combo (+4.08¢ and +5.95¢ volume weighted).
-- The `<10¢` group was positive for both 2-leg (+2.27¢ equal weighted) and
-  3-leg (+1.60¢) combos, but 159 losing positions averaged -92.70¢.
-- The top 100 combos supplied 57.1% of volume, so the slate is descriptive
-  evidence rather than an out-of-sample strategy test.
-
-![Cross-game price buckets around the candidate](research/output/sunday_combo_2026-09-13/price-neighborhood.svg)
-
-![Seller edge and downside by combo structure](research/output/sunday_combo_2026-09-13/structure-breakouts.svg)
-
-![Candidate tail risk and concentration](research/output/sunday_combo_2026-09-13/candidate-risk-exposure.svg)
-
-The component fair-value follow-up retained 3,629 combos with fresh, complete
-leg books. The component midpoint product had a 0.14032 Brier score versus
-0.13967 for combo price, and component premium did not improve selection.
-
-![Combo and component calibration](research/output/sunday_combo_2026-09-13/fair_value/component-calibration.svg)
-
-![Component premium versus seller edge](research/output/sunday_combo_2026-09-13/fair_value/premium-signal.svg)
-
-The full methodology, caveats, reproduction commands, and retained charts are
-in [`research/sep13/README.md`](research/sep13/README.md).
+- `research/sep13/`: reproducible historical analysis and methodology
+- `research/output/`: benchmark results and future slate evaluations
+- `nfl_market_edge/`: frozen scoring and shared collection code
+- `scripts/`: collectors, slate runner, and evaluators
+- `market_scorer/`: separate player-prop scorer and UI
+- `config/`: local and Railway configuration examples
