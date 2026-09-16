@@ -24,8 +24,10 @@ cp config/combo_slate.example.json config/combo_slate.json
   --manifest config/combo_slate.json
 ```
 
-The capture lands under `data/live/combo_slates/<slate_id>/`. Keep the collector
-running through settlement so the evaluator sees lifecycle results. Then run:
+The local runner starts four independent workers: Kalshi, Bovada, FanDuel, and
+BetRivers. The capture lands under `data/live/combo_slates/<slate_id>/`. Keep
+Kalshi running through settlement so the evaluator sees lifecycle results. Then
+run:
 
 ```bash
 .venv/bin/python -m scripts.evaluate_prospective_combo_slate \
@@ -79,20 +81,23 @@ model or an order signal.
 
 ## Collectors
 
-The slate runner is the normal entry point. Individual collectors remain useful
-for focused captures and Railway services:
+The prospective pipeline is deliberately narrow:
+
+- Kalshi records cross-game 2/3-leg combo discovery, RFQs/quotes, combo fills,
+  combo books, component books, and lifecycle/settlement. It does not subscribe
+  to standalone component trades.
+- Bovada, FanDuel, and BetRivers each run independently and write the same
+  per-selection sportsbook schema with local receive time, source time when
+  available, a shared wall-clock snapshot bucket, slate/game IDs,
+  player/prop/line/side, odds, and source IDs.
+
+Individual worker entry points:
 
 ```bash
-# Kalshi game/player markets
-.venv/bin/python -m scripts.collect_live_kalshi_ws --help
-
 # Kalshi combo/RFQ slate capture
 .venv/bin/python -m scripts.collect_live_combo_slate --help
 
-# Bovada streaming props
-.venv/bin/python -m scripts.collect_live_bovada_ws --help
-
-# Normalized Bovada/FanDuel/BetRivers polling
+# One normalized sportsbook source per process
 .venv/bin/python -m scripts.collect_live_sportsbook_props --help
 ```
 
@@ -100,6 +105,49 @@ All sportsbook adapters emit the selection-state contract in
 [`nfl_market_edge/sportsbook.py`](nfl_market_edge/sportsbook.py). Shared Kalshi
 authentication and REST access live in
 [`nfl_market_edge/kalshi.py`](nfl_market_edge/kalshi.py).
+
+### Railway
+
+Create four Railway worker services from this repo and point each service at its
+config file:
+
+| Service | Config | Start command |
+|---|---|---|
+| Kalshi | `railway.kalshi.toml` | `scripts.collect_live_combo_slate` |
+| Bovada | `railway.bovada.toml` | sportsbook worker with `--book bovada` |
+| FanDuel | `railway.fanduel.toml` | sportsbook worker with `--book fanduel` |
+| BetRivers | `railway.betrivers.toml` | sportsbook worker with `--book betrivers` |
+
+Attach a persistent volume to each service. Kalshi needs
+`SLATE_MANIFEST_JSON`, `KALSHI_API_KEY_ID`, and a private-key variable. Each
+sportsbook needs `SLATE_ID`, `SPORTSBOOK_SPORT=nfl|ncaaf`, and comma-separated
+`SPORTSBOOK_GAMES`. See
+[`config/railway.env.example`](config/railway.env.example).
+
+Each worker emits structured `collector_status` JSON to Railway logs and keeps
+its latest status in `health.json`. `ok` means props were collected, `empty`
+means the source responded but has not posted matching props, `partial` means
+some games failed, and `error` means the poll failed. Kalshi reports `starting`,
+`ready`, `connected`, periodic `heartbeat`, reconnects, sequence gaps, and
+lifecycle/settlement messages. Its heartbeat also reports whether authenticated
+fill access is available and how many matching account fills were retained.
+
+The common layout is:
+
+```text
+combo_slates/<slate_id>/
+  kalshi/events.jsonl.gz
+  kalshi/health.json
+  sportsbooks/bovada/{nfl|ncaaf}_props_<utc-date>.jsonl.gz
+  sportsbooks/bovada/health.json
+  sportsbooks/fanduel/...
+  sportsbooks/betrivers/...
+```
+
+Manifest event tickers are matched by their dated game suffix, so one event
+ticker per game is enough even when component legs come from different Kalshi
+series. Optional `combo_tickers` seed already-open combos after a restart; new
+ones are discovered from RFQs and multivariate lifecycle messages.
 
 ## Repo map
 

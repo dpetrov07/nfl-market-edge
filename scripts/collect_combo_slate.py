@@ -1,4 +1,4 @@
-"""Launch synchronized Kalshi and configured sportsbook collectors for one slate."""
+"""Launch the modular Kalshi and sportsbook workers for one local slate."""
 
 from __future__ import annotations
 
@@ -10,52 +10,37 @@ import sys
 from pathlib import Path
 
 
-def bovada_commands(manifest: dict, root: Path, duration: float | None, config: dict) -> list[list[str]]:
-    if manifest["league"].lower() != "nfl":
-        raise ValueError("the current Bovada adapter supports NFL only")
-    command = [
-        sys.executable,
-        "-m",
-        "scripts.collect_live_bovada_ws",
-        "--date",
-        manifest["date"],
-        "--output-dir",
-        str(root / manifest["slate_id"] / "sportsbooks" / "bovada"),
-    ]
-    for game in config.get("games", []):
-        command.extend(("--game", game))
-    if duration:
-        command.extend(("--run-seconds", str(duration)))
-    return [command]
-
-
-def polling_commands(manifest: dict, root: Path, _duration: float | None, config: dict) -> list[list[str]]:
+def sportsbook_commands(manifest: dict, root: Path, config: dict) -> list[list[str]]:
     sport = "ncaaf" if manifest["league"].lower() == "cfb" else "nfl"
-    books = config.get("books", ["bovada"])
+    books = config.get("books", ["bovada", "fanduel", "betrivers"])
+    games = config.get("games") or [
+        event.get("game")
+        for event in manifest["events"]
+        if isinstance(event, dict) and event.get("game")
+    ]
+    if not games:
+        raise ValueError("sportsbooks.games is required when events have no game names")
     commands = []
-    for game in config.get("games", []):
-        slug = "_".join(part.lower() for part in game.replace("@", " ").split())
-        commands.append(
-            [
-                sys.executable,
-                "-m",
-                "scripts.collect_live_sportsbook_props",
-                "--game",
-                game,
-                "--sport",
-                sport,
-                "--books",
-                ",".join(books),
-                "--interval",
-                str(config.get("interval_seconds", 30)),
-                "--output-dir",
-                str(root / manifest["slate_id"] / "sportsbooks" / "polling" / slug),
-            ]
-        )
+    for book in books:
+        command = [
+            sys.executable,
+            "-m",
+            "scripts.collect_live_sportsbook_props",
+            "--book",
+            book,
+            "--sport",
+            sport,
+            "--slate-id",
+            manifest["slate_id"],
+            "--interval",
+            str(config.get("interval_seconds", 30)),
+            "--output-dir",
+            str(root / manifest["slate_id"] / "sportsbooks" / book),
+        ]
+        for game in games:
+            command.extend(("--game", game))
+        commands.append(command)
     return commands
-
-
-SPORTSBOOK_COMMANDS = {"bovada": bovada_commands, "multi_book": polling_commands}
 
 
 def commands(args: argparse.Namespace, manifest: dict) -> list[list[str]]:
@@ -72,16 +57,11 @@ def commands(args: argparse.Namespace, manifest: dict) -> list[list[str]]:
     ]
     if args.duration:
         result[0].extend(("--duration", str(args.duration)))
-    for name, config in manifest.get("sportsbooks", {}).items():
-        if not config.get("enabled", True):
-            continue
-        try:
-            builder = SPORTSBOOK_COMMANDS[name]
-        except KeyError as exc:
-            raise ValueError(
-                f"unknown sportsbook {name!r}; add one command builder to SPORTSBOOK_COMMANDS"
-            ) from exc
-        result.extend(builder(manifest, args.output_dir, args.duration, config))
+    sportsbook_config = manifest.get("sportsbooks", {})
+    if sportsbook_config.get("enabled", True):
+        result.extend(
+            sportsbook_commands(manifest, args.output_dir, sportsbook_config)
+        )
     return result
 
 

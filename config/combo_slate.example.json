@@ -3,18 +3,14 @@
   "league": "nfl",
   "date": "2026-09-20",
   "events": [
-    {"ticker": "REPLACE_WITH_KALSHI_EVENT_TICKER", "game": "AWAY @ HOME"}
+    {"ticker": "REPLACE_WITH_KALSHI_EVENT_TICKER_1", "game": "AWAY 1 @ HOME 1"},
+    {"ticker": "REPLACE_WITH_KALSHI_EVENT_TICKER_2", "game": "AWAY 2 @ HOME 2"}
   ],
+  "combo_tickers": [],
   "sportsbooks": {
-    "bovada": {
-      "enabled": true,
-      "games": ["AWAY @ HOME"]
-    },
-    "multi_book": {
-      "enabled": false,
-      "books": ["bovada", "fanduel", "betrivers"],
-      "games": ["AWAY @ HOME"],
-      "interval_seconds": 30
-    }
+    "enabled": true,
+    "books": ["bovada", "fanduel", "betrivers"],
+    "games": ["AWAY 1 @ HOME 1", "AWAY 2 @ HOME 2"],
+    "interval_seconds": 30
   }
 }

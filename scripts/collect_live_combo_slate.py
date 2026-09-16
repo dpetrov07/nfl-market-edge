@@ -9,7 +9,7 @@ import json
 import os
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import websockets
@@ -17,16 +17,20 @@ import websockets
 from nfl_market_edge.kalshi import (
     API_ROOT,
     KalshiClient,
+    MarketState,
     WS_URL,
     auth_headers,
+    dollar_value,
     load_local_env,
     load_private_key,
+    number,
     utc_now,
 )
-from scripts.collect_live_kalshi_ws import MarketState
+from nfl_market_edge.health import emit_health, health_record
 
 
-MARKET_CHANNELS = ("orderbook_delta", "trade", "ticker")
+BOOK_CHANNELS = ("orderbook_delta",)
+COMBO_CHANNELS = ("trade", "ticker")
 GLOBAL_CHANNELS = ("communications", "market_lifecycle_v2", "multivariate_market_lifecycle")
 COMMUNICATION_TYPES = {
     "rfq_created",
@@ -49,8 +53,21 @@ def compact_market(market: dict) -> dict:
     return {key: market.get(key) for key in fields if market.get(key) is not None}
 
 
-def read_manifest(path: Path) -> dict:
-    manifest = json.loads(path.read_text())
+def event_key(ticker: str | None) -> str | None:
+    """Collapse Kalshi's per-series event tickers to the dated game suffix."""
+    if not ticker or "-" not in ticker:
+        return None
+    return ticker.split("-", 1)[1]
+
+
+def read_manifest(path: Path | None) -> dict:
+    raw = os.getenv("SLATE_MANIFEST_JSON")
+    if path:
+        manifest = json.loads(path.read_text())
+    elif raw:
+        manifest = json.loads(raw)
+    else:
+        raise ValueError("set --manifest or SLATE_MANIFEST_JSON")
     missing = [key for key in ("slate_id", "league", "date", "events") if not manifest.get(key)]
     if missing:
         raise ValueError(f"manifest is missing: {', '.join(missing)}")
@@ -59,9 +76,16 @@ def read_manifest(path: Path) -> dict:
     events = {}
     for value in manifest["events"]:
         if isinstance(value, str):
-            events[value] = value
+            ticker, game = value, value
         else:
-            events[value["ticker"]] = value.get("game") or value["ticker"]
+            ticker = value["ticker"]
+            game = value.get("game") or ticker
+        key = event_key(ticker)
+        if not key:
+            raise ValueError(f"invalid Kalshi event ticker: {ticker!r}")
+        if key in events and events[key] != game:
+            raise ValueError(f"conflicting game names for event suffix {key}")
+        events[key] = game
     manifest["event_games"] = events
     return manifest
 
@@ -70,23 +94,31 @@ def selected_legs(row: dict) -> list[dict]:
     return row.get("mve_selected_legs") or row.get("selected_markets") or []
 
 
-def is_slate_combo(row: dict, event_tickers: set[str]) -> bool:
+def is_slate_combo(row: dict, event_games: dict[str, str]) -> bool:
     legs = selected_legs(row)
-    return len(legs) in (2, 3) and all(leg.get("event_ticker") in event_tickers for leg in legs)
+    games = [event_games.get(event_key(leg.get("event_ticker"))) for leg in legs]
+    return (
+        len(legs) in (2, 3)
+        and all(games)
+        and len(set(games)) > 1
+    )
 
 
 class Writer:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.health_path = path.parent / "health.json"
         self.handle = gzip.open(path, "at", encoding="utf-8", compresslevel=6)
 
     def write(self, record: dict) -> None:
         self.handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
 
     def status(self, status: str, **details) -> None:
-        self.write({"record_type": "collector_status", "received_at": utc_now(), "status": status, **details})
+        record = health_record("kalshi", status, **details)
+        self.write(record)
         self.handle.flush()
+        emit_health(record, self.health_path)
 
     def close(self) -> None:
         self.handle.close()
@@ -96,7 +128,7 @@ class SlateRegistry:
     def __init__(self, manifest: dict, writer: Writer):
         self.manifest = manifest
         self.writer = writer
-        self.event_tickers = set(manifest["event_games"])
+        self.event_games = manifest["event_games"]
         self.combos: dict[str, dict] = {}
         self.components: set[str] = set()
         self.component_metadata: set[str] = set()
@@ -113,23 +145,29 @@ class SlateRegistry:
         return None
 
     def add_combo(self, row: dict, source: str) -> list[str]:
-        if not is_slate_combo(row, self.event_tickers):
+        if not is_slate_combo(row, self.event_games):
             return []
         ticker = row.get("ticker") or row.get("market_ticker")
         if not ticker:
             return []
-        legs = selected_legs(row)
+        legs = [
+            {
+                **leg,
+                "game": self.event_games[event_key(leg.get("event_ticker"))],
+            }
+            for leg in selected_legs(row)
+        ]
         before = self.tickers
         existing = self.combos.get(ticker, {})
         self.combos[ticker] = {
             **existing,
+            **compact_market(row),
             "ticker": ticker,
             "event_ticker": row.get("event_ticker") or existing.get("event_ticker"),
             "mve_collection_ticker": row.get("mve_collection_ticker")
             or row.get("collection_ticker")
             or existing.get("mve_collection_ticker"),
             "mve_selected_legs": legs,
-            **compact_market(row),
         }
         self.components.update(leg["market_ticker"] for leg in legs)
         self.writer.write(
@@ -159,11 +197,20 @@ class SlateRegistry:
 
 
 def open_combo_markets(client: KalshiClient, registry: SlateRegistry) -> list[dict]:
+    # MVE markets are created around RFQ activity. A short lookback recovers
+    # recent markets after a restart without exhaustively crawling all open MVEs.
+    recent = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
     markets, _, _ = client.paginate(
         API_ROOT + "/markets",
-        {"mve_filter": "only", "status": "open", "limit": 1000},
+        {
+            "mve_filter": "only",
+            "status": "open",
+            "min_created_ts": recent,
+            "limit": 1000,
+        },
         "markets",
-        row_filter=lambda row: is_slate_combo(row, registry.event_tickers),
+        row_filter=lambda row: is_slate_combo(row, registry.event_games),
+        max_pages=2,
     )
     return markets
 
@@ -174,7 +221,8 @@ def open_rfqs(client: KalshiClient, registry: SlateRegistry) -> list[dict]:
         {"status": "open", "limit": 100},
         "rfqs",
         auth=True,
-        row_filter=lambda row: is_slate_combo(row, registry.event_tickers),
+        row_filter=lambda row: is_slate_combo(row, registry.event_games),
+        max_pages=2,
     )
     return rows
 
@@ -186,8 +234,55 @@ def open_quotes(client: KalshiClient, registry: SlateRegistry) -> list[dict]:
         "quotes",
         auth=True,
         row_filter=lambda row: row.get("market_ticker") in registry.combos,
+        max_pages=2,
     )
     return rows
+
+
+def recent_fills(client: KalshiClient, min_ts: int) -> list[dict]:
+    rows, _, _ = client.paginate(
+        API_ROOT + "/portfolio/fills",
+        {"min_ts": min_ts, "limit": 1000},
+        "fills",
+        auth=True,
+        max_pages=2,
+    )
+    return rows
+
+
+def fill_timestamp(row: dict) -> int | None:
+    value = row.get("ts") or row.get("created_ts") or row.get("created_time")
+    try:
+        parsed = float(value)
+        return int(parsed / 1000 if parsed > 10_000_000_000 else parsed)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def fill_record(row: dict, slate_id: str) -> dict:
+    ticker = row.get("market_ticker") or row.get("ticker")
+    count = row.get("count_fp") if row.get("count_fp") is not None else row.get("count")
+    return {
+        "record_type": "fill",
+        "received_at": utc_now(),
+        "exchange_timestamp": row.get("created_time") or row.get("ts"),
+        "slate_id": slate_id,
+        "market_ticker": ticker,
+        "trade_id": row.get("trade_id"),
+        "fill_id": row.get("fill_id") or row.get("id"),
+        "order_id": row.get("order_id"),
+        "side": row.get("side"),
+        "action": row.get("action"),
+        "count": number(count),
+        "yes_price_dollars": dollar_value(row, "yes_price_dollars", "yes_price"),
+        "no_price_dollars": dollar_value(row, "no_price_dollars", "no_price"),
+        "is_taker": row.get("is_taker"),
+        "payload": row,
+    }
 
 
 def market_metadata(client: KalshiClient, tickers: set[str]) -> list[dict]:
@@ -211,11 +306,29 @@ async def subscribe(ws, command_id: int, channel: str, tickers: list[str] | None
     return command_id + 1
 
 
-async def subscribe_markets(ws, command_id: int, tickers: list[str]) -> int:
+async def subscribe_channels(
+    ws, command_id: int, tickers: list[str], channels: tuple[str, ...]
+) -> int:
     for index in range(0, len(tickers), 200):
         chunk = tickers[index : index + 200]
-        for channel in MARKET_CHANNELS:
+        for channel in channels:
             command_id = await subscribe(ws, command_id, channel, chunk)
+    return command_id
+
+
+async def subscribe_market_data(
+    ws, command_id: int, registry: SlateRegistry, tickers: list[str]
+) -> int:
+    tickers = sorted(set(tickers))
+    if tickers:
+        command_id = await subscribe_channels(
+            ws, command_id, tickers, BOOK_CHANNELS
+        )
+    combo_tickers = [ticker for ticker in tickers if registry.role(ticker) == "combo"]
+    if combo_tickers:
+        command_id = await subscribe_channels(
+            ws, command_id, combo_tickers, COMBO_CHANNELS
+        )
     return command_id
 
 
@@ -268,6 +381,34 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
     client.key_id = key_id
     client.private_key = private_key
     registry = SlateRegistry(manifest, writer)
+    fill_since = int(time.time()) - 300
+    seen_fills: set[str] = set()
+    fills_received = 0
+    fill_api_available = True
+
+    async def poll_fills() -> None:
+        nonlocal fill_since, fills_received, fill_api_available
+        if not fill_api_available:
+            return
+        rows = await asyncio.to_thread(recent_fills, client, fill_since)
+        fill_api_available = API_ROOT + "/portfolio/fills" not in client.denied_paths
+        newest = fill_since
+        for row in rows:
+            timestamp = fill_timestamp(row)
+            if timestamp is not None:
+                newest = max(newest, timestamp)
+            ticker = row.get("market_ticker") or row.get("ticker")
+            identity = str(
+                row.get("fill_id")
+                or row.get("id")
+                or (row.get("trade_id"), row.get("order_id"), row.get("ts"))
+            )
+            if ticker not in registry.combos or identity in seen_fills:
+                continue
+            seen_fills.add(identity)
+            writer.write(fill_record(row, manifest["slate_id"]))
+            fills_received += 1
+        fill_since = max(fill_since, newest - 1)
 
     writer.write(
         {
@@ -277,49 +418,109 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
             **{key: value for key, value in manifest.items() if key != "event_games"},
         }
     )
-    if not args.skip_initial_scan:
-        for row in await asyncio.to_thread(open_combo_markets, client, registry):
-            registry.add_combo(row, "initial_open_market_scan")
-    for row in await asyncio.to_thread(open_rfqs, client, registry):
-        registry.add_combo({**row, "ticker": row.get("market_ticker")}, "initial_open_rfq_scan")
-        writer.write(
-            {
-                "record_type": "communication",
-                "received_at": utc_now(),
-                "communication_type": "rfq_snapshot",
-                "market_ticker": row.get("market_ticker"),
-                "rfq_id": row.get("id"),
-                "exchange_timestamp": row.get("updated_ts") or row.get("created_ts"),
-                "contracts": row.get("contracts_fp"),
-                "yes_contracts": row.get("yes_contracts_fp"),
-                "no_contracts": row.get("no_contracts_fp"),
-                "target_cost_dollars": row.get("target_cost_dollars"),
-                "status": row.get("status"),
-                "payload": row,
-            }
-        )
-    for row in await asyncio.to_thread(open_quotes, client, registry):
-        writer.write(
-            {
-                "record_type": "communication",
-                "received_at": utc_now(),
-                "communication_type": "quote_snapshot",
-                "market_ticker": row.get("market_ticker"),
-                "rfq_id": row.get("rfq_id"),
-                "quote_id": row.get("id"),
-                "exchange_timestamp": row.get("updated_ts") or row.get("created_ts"),
-                "contracts": row.get("contracts_fp"),
-                "yes_contracts": row.get("yes_contracts_fp"),
-                "no_contracts": row.get("no_contracts_fp"),
-                "yes_bid_dollars": row.get("yes_bid_dollars"),
-                "no_bid_dollars": row.get("no_bid_dollars"),
-                "target_cost_dollars": row.get("rfq_target_cost_dollars"),
-                "accepted_side": row.get("accepted_side"),
-                "status": row.get("status"),
-                "payload": row,
-            }
-        )
-    registry.add_component_metadata(await asyncio.to_thread(market_metadata, client, registry.components))
+    writer.status(
+        "starting",
+        slate_id=manifest["slate_id"],
+        league=manifest["league"],
+        game_count=len(manifest["event_games"]),
+    )
+    setup_backoff = 1
+    while not STOP:
+        try:
+            seed_tickers = set(manifest.get("combo_tickers", []))
+            if seed_tickers:
+                for row in await asyncio.to_thread(
+                    market_metadata, client, seed_tickers
+                ):
+                    registry.add_combo(row, "manifest_seed")
+            if not args.skip_initial_scan:
+                markets = await asyncio.to_thread(
+                    open_combo_markets, client, registry
+                )
+                for row in markets:
+                    registry.add_combo(row, "initial_open_market_scan")
+            rfqs = await asyncio.to_thread(open_rfqs, client, registry)
+            for row in rfqs:
+                registry.add_combo(
+                    {**row, "ticker": row.get("market_ticker")},
+                    "initial_open_rfq_scan",
+                )
+                writer.write(
+                    {
+                        "record_type": "communication",
+                        "received_at": utc_now(),
+                        "communication_type": "rfq_snapshot",
+                        "market_ticker": row.get("market_ticker"),
+                        "rfq_id": row.get("id"),
+                        "exchange_timestamp": row.get("updated_ts")
+                        or row.get("created_ts"),
+                        "contracts": row.get("contracts_fp"),
+                        "yes_contracts": row.get("yes_contracts_fp"),
+                        "no_contracts": row.get("no_contracts_fp"),
+                        "target_cost_dollars": row.get("target_cost_dollars"),
+                        "status": row.get("status"),
+                        "payload": row,
+                    }
+                )
+            quotes = await asyncio.to_thread(open_quotes, client, registry)
+            for row in quotes:
+                writer.write(
+                    {
+                        "record_type": "communication",
+                        "received_at": utc_now(),
+                        "communication_type": "quote_snapshot",
+                        "market_ticker": row.get("market_ticker"),
+                        "rfq_id": row.get("rfq_id"),
+                        "quote_id": row.get("id"),
+                        "exchange_timestamp": row.get("updated_ts")
+                        or row.get("created_ts"),
+                        "contracts": row.get("contracts_fp"),
+                        "yes_contracts": row.get("yes_contracts_fp"),
+                        "no_contracts": row.get("no_contracts_fp"),
+                        "yes_bid_dollars": row.get("yes_bid_dollars"),
+                        "no_bid_dollars": row.get("no_bid_dollars"),
+                        "target_cost_dollars": row.get(
+                            "rfq_target_cost_dollars"
+                        ),
+                        "accepted_side": row.get("accepted_side"),
+                        "status": row.get("status"),
+                        "payload": row,
+                    }
+                )
+            registry.add_component_metadata(
+                await asyncio.to_thread(
+                    market_metadata, client, registry.components
+                )
+            )
+            await poll_fills()
+            writer.status(
+                "ready",
+                slate_id=manifest["slate_id"],
+                combo_count=len(registry.combos),
+                component_count=len(registry.components),
+                open_rfq_count=len(rfqs),
+                quote_api_available=(
+                    API_ROOT + "/communications/quotes"
+                    not in client.denied_paths
+                ),
+                fill_api_available=fill_api_available,
+                fills_received=fills_received,
+            )
+            break
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            writer.status(
+                "setup_error",
+                error=f"{type(exc).__name__}: {exc}",
+                retry_in_seconds=setup_backoff,
+            )
+            await asyncio.sleep(setup_backoff)
+            setup_backoff = min(setup_backoff * 2, 30)
+
+    if STOP:
+        writer.status("stopped", reason="signal_during_setup")
+        return
 
     started = time.monotonic()
     attempt, backoff = 0, 1
@@ -341,16 +542,17 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                 for channel in GLOBAL_CHANNELS:
                     command_id = await subscribe(ws, command_id, channel)
                 if registry.tickers:
-                    command_id = await subscribe_markets(
-                        ws, command_id, sorted(registry.tickers)
+                    command_id = await subscribe_market_data(
+                        ws, command_id, registry, sorted(registry.tickers)
                     )
                 state = MarketState(sorted(registry.tickers), args.top_size_change)
                 last_sequence, last_heartbeat = {}, 0.0
-                messages = 0
+                messages, last_message_at = 0, None
                 backoff = 1
                 while not STOP and (not args.duration or time.monotonic() - started < args.duration):
                     now = time.monotonic()
                     if now - last_heartbeat >= args.heartbeat_seconds:
+                        await poll_fills()
                         writer.status(
                             "heartbeat",
                             connection_id=connection_id,
@@ -358,6 +560,9 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                             combo_count=len(registry.combos),
                             component_count=len(registry.components),
                             books_initialized=len(state.initialized),
+                            fills_received=fills_received,
+                            fill_api_available=fill_api_available,
+                            last_message_at=last_message_at,
                         )
                         last_heartbeat = now
                     try:
@@ -365,6 +570,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                     except asyncio.TimeoutError:
                         continue
                     received_at = utc_now()
+                    last_message_at = received_at
                     messages += 1
                     msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
                     sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
@@ -377,14 +583,16 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
 
                     message_type = raw.get("type")
                     if message_type in COMMUNICATION_TYPES:
-                        if message_type == "rfq_created" and is_slate_combo(msg, registry.event_tickers):
+                        if message_type == "rfq_created" and is_slate_combo(
+                            msg, registry.event_games
+                        ):
                             new_tickers = registry.add_combo(
                                 {**msg, "ticker": msg.get("market_ticker")}, "communications"
                             )
                             if new_tickers:
                                 state.add_tickers(new_tickers)
-                                command_id = await subscribe_markets(
-                                    ws, command_id, new_tickers
+                                command_id = await subscribe_market_data(
+                                    ws, command_id, registry, new_tickers
                                 )
                                 metadata = await asyncio.to_thread(
                                     market_metadata, client, set(new_tickers) & registry.components
@@ -410,8 +618,8 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                         new_tickers = registry.add_combo(market, "multivariate_lifecycle")
                         if new_tickers:
                             state.add_tickers(new_tickers)
-                            command_id = await subscribe_markets(
-                                ws, command_id, new_tickers
+                            command_id = await subscribe_market_data(
+                                ws, command_id, registry, new_tickers
                             )
                             metadata = await asyncio.to_thread(
                                 market_metadata, client, set(new_tickers) & registry.components
@@ -436,15 +644,29 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
 
 
 def parse_args() -> argparse.Namespace:
+    volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    default_output = os.getenv("COLLECTOR_OUTPUT_ROOT") or (
+        str(Path(volume) / "combo_slates")
+        if volume
+        else "data/live/combo_slates"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=Path("data/live/combo_slates"))
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--output-dir", type=Path, default=Path(default_output))
     parser.add_argument("--key-id")
     parser.add_argument("--private-key-path")
     parser.add_argument("--duration", type=float)
     parser.add_argument("--skip-initial-scan", action="store_true")
-    parser.add_argument("--heartbeat-seconds", type=float, default=5)
-    parser.add_argument("--top-size-change", type=float, default=0)
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=float(os.getenv("COLLECTOR_HEARTBEAT_SECONDS", "15")),
+    )
+    parser.add_argument(
+        "--top-size-change",
+        type=float,
+        default=float(os.getenv("KALSHI_TOP_SIZE_CHANGE", "0")),
+    )
     return parser.parse_args()
 
 
@@ -459,7 +681,7 @@ def main() -> None:
     manifest = read_manifest(args.manifest)
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
-    path = args.output_dir / manifest["slate_id"] / "kalshi.jsonl.gz"
+    path = args.output_dir / manifest["slate_id"] / "kalshi" / "events.jsonl.gz"
     writer = Writer(path)
     print(f"capturing {manifest['slate_id']} -> {path}", flush=True)
     try:

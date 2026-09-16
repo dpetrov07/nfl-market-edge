@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import re
@@ -14,6 +15,13 @@ from pathlib import Path
 
 import requests as http_requests
 from curl_cffi import requests
+
+from nfl_market_edge.health import emit_health, health_record
+from nfl_market_edge.sportsbook import (
+    SCHEMA_VERSION,
+    selection_state_record,
+    validate_selection_state,
+)
 
 
 BOVADA_URL = (
@@ -97,7 +105,6 @@ NFL_CITY_ALIASES = {
     "ten": "tennessee",
     "was": "washington",
 }
-SCHEMA_VERSION = 1
 STOP = False
 
 
@@ -122,6 +129,12 @@ def parse_float(value) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def decimal_from_american(value: int | None) -> float | None:
+    if value is None or value == 0:
+        return None
+    return 1 + (100 / abs(value) if value < 0 else value / 100)
 
 
 def normalize_game(value: str) -> str:
@@ -521,68 +534,165 @@ def fetch_betrivers(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[d
     return rows, errors
 
 
+def selection_records(
+    rows: list[dict],
+    session_id: str,
+    slate_id: str,
+    sport: str,
+    snapshot_at: str | None = None,
+) -> list[dict]:
+    """Expand paired quote rows into the shared per-selection record contract."""
+    records = []
+    for row in rows:
+        if not row.get("prop_type") or not row.get("player"):
+            continue
+        for side in ("over", "under"):
+            selection_id = row.get(f"{side}_selection_id")
+            odds = row.get(f"{side}_odds")
+            if not selection_id or odds is None:
+                continue
+            record = selection_state_record(
+                sportsbook=row["sportsbook"],
+                session_id=session_id,
+                received_at=row["fetched_at"],
+                source="poll",
+                change_type="snapshot",
+                event={
+                    "slate_id": slate_id,
+                    "sport": sport,
+                    "poll_id": row["poll_id"],
+                    "snapshot_at": snapshot_at,
+                    "source_update_at": row.get("source_update_at"),
+                    "game": row["game"],
+                    "event_id": row["event_id"],
+                    "scheduled_start": row.get("scheduled_start"),
+                    "event_status": row.get("event_status"),
+                    "is_live": row.get("is_live"),
+                    "away_team": row.get("away_team"),
+                    "away_team_id": row.get("away_team_id"),
+                    "home_team": row.get("home_team"),
+                    "home_team_id": row.get("home_team_id"),
+                },
+                selection={
+                    "player": row["player"],
+                    "player_id": row.get("player_id"),
+                    "player_team": row.get("player_team"),
+                    "prop_type": row["prop_type"],
+                    "is_alternate": bool(row.get("is_alternate")),
+                    "side": side,
+                    "line": row["threshold"],
+                    "threshold": row["threshold"],
+                    "market_id": row["market_id"],
+                    "selection_id": selection_id,
+                    "american_odds": odds,
+                    "decimal_odds": decimal_from_american(odds),
+                    "state": "open",
+                },
+                changed=["american_odds", "decimal_odds", "line", "state"],
+            )
+            validate_selection_state(record)
+            records.append(record)
+    return records
+
+
 def source_record(
-    poll_id: str, sportsbook: str, started_at: str, rows: list[dict], errors: list[str]
+    *,
+    poll_id: str,
+    sportsbook: str,
+    slate_id: str,
+    sport: str,
+    games: list[str],
+    started_at: str,
+    snapshot_at: str,
+    records: list[dict],
+    errors: list[str],
+    elapsed_seconds: float,
+    consecutive_failures: int,
 ) -> dict:
-    status = "partial" if rows and errors else "error" if errors else "ok" if rows else "empty"
-    return {
-        "record_type": "source_poll",
-        "schema_version": SCHEMA_VERSION,
-        "poll_id": poll_id,
-        "sportsbook": sportsbook,
-        "poll_started_at": started_at,
-        "fetched_at": utc_now(),
-        "status": status,
-        "quote_count": len(rows),
-        "matched_game_count": len({row["event_id"] for row in rows}),
-        "errors": errors,
-    }
+    status = (
+        "partial"
+        if records and errors
+        else "error"
+        if errors
+        else "ok"
+        if records
+        else "empty"
+    )
+    return health_record(
+        sportsbook,
+        status,
+        schema_version=SCHEMA_VERSION,
+        poll_id=poll_id,
+        sportsbook=sportsbook,
+        slate_id=slate_id,
+        sport=sport,
+        requested_games=games,
+        poll_started_at=started_at,
+        snapshot_at=snapshot_at,
+        elapsed_seconds=round(elapsed_seconds, 3),
+        selection_count=len(records),
+        matched_game_count=len({row["event_id"] for row in records}),
+        consecutive_failures=consecutive_failures,
+        errors=errors,
+    )
 
 
-def append_records(output_dir: Path, records: list[dict], sport: str = "nfl") -> Path:
+def append_records(output_dir: Path, records: list[dict], sport: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     day = datetime.now(timezone.utc).date().isoformat()
-    path = output_dir / f"{sport}_player_props_{day}.jsonl"
-    with path.open("a", encoding="utf-8") as handle:
+    path = output_dir / f"{sport}_props_{day}.jsonl.gz"
+    with gzip.open(path, "at", encoding="utf-8", compresslevel=6) as handle:
         for record in records:
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
-        handle.flush()
     return path
 
 
 def parse_args() -> argparse.Namespace:
-    volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
-    default_output = os.getenv("SPORTSBOOK_OUTPUT_DIR") or (
-        str(Path(volume) / "sportsbook_live") if volume else "data/raw/sportsbook_live"
-    )
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--game", default=os.getenv("SPORTSBOOK_GAME"), help="Example: SF 49ers @ LA Rams")
     parser.add_argument(
-        "--books",
-        default=os.getenv("SPORTSBOOK_BOOKS", "bovada"),
-        help="Comma-separated sportsbook list (bovada,fanduel,betrivers)",
+        "--book",
+        choices=("bovada", "fanduel", "betrivers"),
+        default=os.getenv("SPORTSBOOK_BOOK", "bovada").lower(),
     )
+    parser.add_argument("--game", action="append", help="Repeat for each slate game")
     parser.add_argument(
         "--sport",
         choices=("nfl", "ncaaf"),
         default=os.getenv("SPORTSBOOK_SPORT", "nfl").lower(),
     )
     parser.add_argument(
+        "--slate-id",
+        default=os.getenv("SLATE_ID"),
+        help="Stable join key shared with the Kalshi manifest",
+    )
+    parser.add_argument(
         "--interval",
         type=float,
         default=float(os.getenv("SPORTSBOOK_POLL_SECONDS", "30")),
-        help="Seconds from one poll start to the next",
     )
-    parser.add_argument("--output-dir", type=Path, default=Path(default_output))
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--once", action="store_true")
-    parser.add_argument("--max-polls", type=int, help="Useful for a short smoke test")
+    parser.add_argument("--max-polls", type=int)
     args = parser.parse_args()
-    if not args.game:
-        parser.error("set --game or SPORTSBOOK_GAME")
-    args.books = [book.strip().lower() for book in args.books.split(",") if book.strip()]
-    unknown = set(args.books) - {"bovada", "fanduel", "betrivers"}
-    if unknown:
-        parser.error(f"unsupported books: {', '.join(sorted(unknown))}")
+    configured_games = os.getenv("SPORTSBOOK_GAMES") or os.getenv(
+        "SPORTSBOOK_GAME", ""
+    )
+    args.games = args.game or [
+        game.strip() for game in configured_games.split(",") if game.strip()
+    ]
+    if not args.games:
+        parser.error("set --game or SPORTSBOOK_GAMES")
+    if not args.slate_id:
+        parser.error("set --slate-id or SLATE_ID")
+    if args.interval <= 0:
+        parser.error("--interval must be positive")
+    if args.output_dir is None:
+        volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+        root = Path(
+            os.getenv("COLLECTOR_OUTPUT_ROOT")
+            or (str(Path(volume) / "combo_slates") if volume else "data/live/combo_slates")
+        )
+        args.output_dir = root / args.slate_id / "sportsbooks" / args.book
     return args
 
 
@@ -595,39 +705,78 @@ def main() -> None:
     args = parse_args()
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    fetchers = {
+    fetcher = {
         "bovada": fetch_bovada,
         "fanduel": fetch_fanduel,
         "betrivers": fetch_betrivers,
-    }
+    }[args.book]
+    session_id = (
+        f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}-"
+        f"{uuid.uuid4().hex[:8]}"
+    )
     print(
-        f"Collecting {args.game!r} from {', '.join(args.books)} every {args.interval:g}s "
-        f"into {args.output_dir}",
+        f"Collecting {args.sport} props for {len(args.games)} game(s) from "
+        f"{args.book} every {args.interval:g}s into {args.output_dir}",
         flush=True,
     )
-    poll_number = 0
+    emit_health(
+        health_record(
+            args.book,
+            "starting",
+            slate_id=args.slate_id,
+            sport=args.sport,
+            requested_games=args.games,
+        ),
+        args.output_dir / "health.json",
+    )
+    poll_number = consecutive_failures = 0
     while not STOP:
         cycle_started = time.monotonic()
         poll_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}-{uuid.uuid4().hex[:8]}"
         poll_started_at = utc_now()
-        records = []
-        for book in args.books:
+        bucket_seconds = max(args.interval, 1)
+        snapshot_at = datetime.fromtimestamp(
+            (time.time() // bucket_seconds) * bucket_seconds,
+            tz=timezone.utc,
+        ).isoformat()
+        raw_rows, errors = [], []
+        for game in args.games:
             try:
-                rows, errors = fetchers[book](args.game, poll_id, args.sport)
+                rows, game_errors = fetcher(game, poll_id, args.sport)
+                raw_rows.extend(rows)
+                errors.extend(f"{game}: {error}" for error in game_errors)
             except Exception as exc:
-                rows, errors = [], [f"{type(exc).__name__}: {exc}"]
-            records.extend(rows)
-            records.append(source_record(poll_id, book, poll_started_at, rows, errors))
-            status = records[-1]["status"]
-            print(f"{records[-1]['fetched_at']} {book}: {len(rows)} quotes ({status})", flush=True)
-            for error in errors:
-                print(f"  {book} error: {error}", flush=True)
-        path = append_records(args.output_dir, records, args.sport)
-        print(f"saved {len(records)} records -> {path}", flush=True)
+                errors.append(f"{game}: {type(exc).__name__}: {exc}")
+        records = selection_records(
+            raw_rows, session_id, args.slate_id, args.sport, snapshot_at
+        )
+        consecutive_failures = consecutive_failures + 1 if errors and not records else 0
+        status = source_record(
+            poll_id=poll_id,
+            sportsbook=args.book,
+            slate_id=args.slate_id,
+            sport=args.sport,
+            games=args.games,
+            started_at=poll_started_at,
+            snapshot_at=snapshot_at,
+            records=records,
+            errors=errors,
+            elapsed_seconds=time.monotonic() - cycle_started,
+            consecutive_failures=consecutive_failures,
+        )
+        path = append_records(args.output_dir, [*records, status], args.sport)
+        emit_health(status, args.output_dir / "health.json")
+        print(f"saved {len(records)} selections -> {path}", flush=True)
         poll_number += 1
         if args.once or (args.max_polls and poll_number >= args.max_polls):
             break
-        remaining = args.interval - (time.monotonic() - cycle_started)
+        if consecutive_failures:
+            retry_delay = min(2 ** min(consecutive_failures, 6), 60)
+            remaining = max(args.interval, retry_delay) - (
+                time.monotonic() - cycle_started
+            )
+        else:
+            remaining = args.interval - time.time() % args.interval
         if remaining > 0:
             time.sleep(remaining)
 

@@ -85,21 +85,22 @@ names.
 
 ## Railway use
 
-Create a service with `railway.sportsbooks.toml`, attach the same persistent
-volume pattern used by the other collectors, and set for example:
+Create one service per book with `railway.fanduel.toml` or
+`railway.betrivers.toml`, attach a persistent volume, and set for example:
 
 ```text
+SLATE_ID=nfl-2026-09-20
 SPORTSBOOK_SPORT=nfl
-SPORTSBOOK_GAME=Detroit Lions @ Buffalo Bills
-SPORTSBOOK_BOOKS=fanduel,betrivers
+SPORTSBOOK_GAMES=Detroit Lions @ Buffalo Bills
 SPORTSBOOK_POLL_SECONDS=30
 ```
 
-Run one deployment as a smoke test and require both `source_poll` records to be
-`ok` before relying on it. A 15–30 second poll interval is appropriate for
-FanDuel's cache behavior. Keep per-book failures isolated (the collector already
-does this), alert on repeated 403/empty responses, and preserve `fetched_at`
-because neither source supplies a trustworthy price-update timestamp.
+Run one deployment as a smoke test and require each service's
+`collector_status` record to be `ok` before relying on it. A 15–30 second poll
+interval is appropriate for FanDuel's cache behavior. The separate services
+keep failures isolated; alert on repeated errors or unexpected empty responses.
+Receipt timestamps are preserved because neither source supplies a trustworthy
+price-update timestamp.
 
 These are undocumented consumer endpoints, not licensed feeds. They can change
 without notice and their permitted use should be checked against each site's

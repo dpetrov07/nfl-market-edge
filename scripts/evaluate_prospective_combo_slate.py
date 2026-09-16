@@ -12,6 +12,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 from nfl_market_edge.combo import fee_per_contract
+from scripts.collect_live_combo_slate import event_key, read_manifest
 from scripts.evaluate_combo_scorer import score_rows, summarize
 
 
@@ -71,14 +72,19 @@ def leg_snapshot(combo: dict, books: dict, at) -> dict:
 def activity_snapshot(record: dict, combo: dict, books: dict, event_games: dict) -> dict:
     at = timestamp(record.get("received_at"))
     legs = combo.get("mve_selected_legs") or []
-    games = [event_games.get(leg.get("event_ticker"), leg.get("event_ticker")) for leg in legs]
+    games = [
+        leg.get("game")
+        or event_games.get(event_key(leg.get("event_ticker")))
+        or leg.get("event_ticker")
+        for leg in legs
+    ]
     combo_book = books.get(combo["ticker"])
     result = {
         "combo_market_ticker": combo["ticker"],
         "observed_at": at,
         "leg_count": len(legs),
-        "distinct_leg_games": len({leg.get("event_ticker") for leg in legs}),
-        "scope": "same_game" if len({leg.get("event_ticker") for leg in legs}) == 1 else "cross_game",
+        "distinct_leg_games": len(set(games)),
+        "scope": "same_game" if len(set(games)) == 1 else "cross_game",
         "games": ", ".join(sorted(set(games))),
         "combo_bid": combo_book["yes_bid"] if combo_book else None,
         "combo_bid_size": combo_book["yes_bid_size"] if combo_book else None,
@@ -117,8 +123,8 @@ def load_capture(path: Path, manifest: dict):
                     "yes_ask": number(record.get("yes_ask_dollars")),
                     "yes_ask_size": number(record.get("yes_ask_size")),
                 }
-            elif kind == "trade" and record.get("market_ticker") in combos:
-                trade_id = record.get("trade_id")
+            elif kind in {"trade", "fill"} and record.get("market_ticker") in combos:
+                trade_id = record.get("trade_id") or record.get("fill_id")
                 if trade_id and trade_id in seen_trades:
                     continue
                 if trade_id:
@@ -132,7 +138,8 @@ def load_capture(path: Path, manifest: dict):
                         "exchange_timestamp": record.get("exchange_timestamp"),
                         "size": number(record.get("count")),
                         "yes_price": number(record.get("yes_price_dollars")),
-                        "taker_side": record.get("taker_outcome_side"),
+                        "taker_side": record.get("taker_outcome_side")
+                        or record.get("side"),
                     }
                 )
             elif kind == "communication" and record.get("market_ticker") in combos:
@@ -224,13 +231,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    manifest = json.loads(args.manifest.read_text())
-    manifest["event_games"] = {
-        event if isinstance(event, str) else event["ticker"]:
-        event if isinstance(event, str) else event.get("game", event["ticker"])
-        for event in manifest["events"]
-    }
-    raw = args.input or ROOT / "data/live/combo_slates" / manifest["slate_id"] / "kalshi.jsonl.gz"
+    manifest = read_manifest(args.manifest)
+    raw = args.input or (
+        ROOT
+        / "data/live/combo_slates"
+        / manifest["slate_id"]
+        / "kalshi"
+        / "events.jsonl.gz"
+    )
     output = args.output_dir or ROOT / "research/output" / manifest["slate_id"] / "prospective"
     output.mkdir(parents=True, exist_ok=True)
     fills, communications, settlements = load_capture(raw, manifest)

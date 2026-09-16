@@ -3,6 +3,6 @@ builder = "RAILPACK"
 
 # Required: SLATE_ID, SPORTSBOOK_SPORT=nfl|ncaaf, SPORTSBOOK_GAMES.
 [deploy]
-startCommand = "python -m scripts.collect_live_sportsbook_props --book bovada"
+startCommand = "python -m scripts.collect_live_sportsbook_props --book betrivers"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
