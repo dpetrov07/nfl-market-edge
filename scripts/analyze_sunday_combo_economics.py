@@ -13,10 +13,11 @@ from statistics import mean, median
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from combo_fair_value import reconstruct_leg_quotes
+
 
 DEFAULT_ROOT = Path("data/sunday_2026-09-13")
 FEE_RATE = 0.07
-GAME_ALIASES = {"CLE @ JAC": "CLE @ JAX", "WAS @ PHI": "WSH @ PHI"}
 
 
 def average(rows, field, weight=None):
@@ -195,80 +196,6 @@ def short_yes_risk_audit(rows, legs, price_ceiling=0.10):
     }
 
 
-def game_paths(processed_dir: Path):
-    paths = {}
-    for path in sorted(processed_dir.glob("*.parquet")):
-        batch = next(pq.ParquetFile(path).iter_batches(batch_size=1, columns=["game"]), None)
-        if batch is not None:
-            paths[batch.column("game")[0].as_py()] = path
-    return paths
-
-
-def executable_leg_quotes(fill_rows, legs, processed_dir: Path):
-    legs_by_combo = defaultdict(list)
-    for leg in legs:
-        legs_by_combo[leg["combo_market_ticker"]].append(leg)
-
-    queries = defaultdict(list)
-    for fill in fill_rows:
-        if not fill["kalshi_joinable"]:
-            continue
-        for leg in legs_by_combo[fill["combo_market_ticker"]]:
-            queries[leg["game"]].append(
-                {
-                    "at": fill["executed_at"],
-                    "fill_id": fill["trade_id"],
-                    "ticker": leg["underlying_market_ticker"],
-                    "side": leg["side"],
-                }
-            )
-
-    result = {}
-    paths = game_paths(processed_dir)
-    for game, game_queries in queries.items():
-        game_queries.sort(key=lambda row: row["at"])
-        wanted = {row["ticker"] for row in game_queries}
-        state, query_index = {}, 0
-
-        def resolve(query):
-            book = state.get(query["ticker"])
-            if not book:
-                return
-            bid, bid_size, ask, ask_size, observed_at = book
-            if query["side"] == "yes":
-                price, size = ask, ask_size
-            else:
-                price, size = (1 - bid if bid is not None else None), bid_size
-            if price is not None and size is not None:
-                result[(query["fill_id"], query["ticker"])] = {
-                    "price": price,
-                    "size": size,
-                    "age_seconds": (query["at"] - observed_at).total_seconds(),
-                }
-
-        path = paths[GAME_ALIASES.get(game, game)]
-        columns = [
-            "received_at", "event_type", "market_ticker", "yes_bid",
-            "yes_bid_size", "yes_ask", "yes_ask_size",
-        ]
-        for batch in pq.ParquetFile(path).iter_batches(batch_size=131072, columns=columns):
-            data = batch.to_pydict()
-            for values in zip(*(data[column] for column in columns)):
-                row = dict(zip(columns, values))
-                while query_index < len(game_queries) and game_queries[query_index]["at"] < row["received_at"]:
-                    resolve(game_queries[query_index])
-                    query_index += 1
-                if row["event_type"] == "top_of_book" and row["market_ticker"] in wanted:
-                    state[row["market_ticker"]] = (
-                        row["yes_bid"], row["yes_bid_size"], row["yes_ask"],
-                        row["yes_ask_size"], row["received_at"],
-                    )
-        while query_index < len(game_queries):
-            resolve(game_queries[query_index])
-            query_index += 1
-    return result, legs_by_combo
-
-
 def correlation(xs, ys):
     if len(xs) < 2:
         return None
@@ -330,7 +257,7 @@ def main():
             }
         )
 
-    leg_quotes, legs_by_combo = executable_leg_quotes(
+    leg_quotes, legs_by_combo = reconstruct_leg_quotes(
         fills, legs, args.data_root / "processed" / "kalshi"
     )
     for fill in fills:
@@ -338,12 +265,17 @@ def main():
             leg_quotes.get((fill["trade_id"], leg["underlying_market_ticker"]))
             for leg in legs_by_combo[fill["combo_market_ticker"]]
         ]
-        if quotes and all(quote is not None for quote in quotes):
-            product = math.prod(quote["price"] for quote in quotes)
+        if quotes and all(
+            quote is not None
+            and quote["ask"] is not None
+            and quote["ask_size"] is not None
+            for quote in quotes
+        ):
+            product = math.prod(quote["ask"] for quote in quotes)
             fill["leg_ask_product"] = product
             fill["combo_premium_to_leg_product"] = fill["yes_price"] - product
             fill["max_leg_quote_age_seconds"] = max(quote["age_seconds"] for quote in quotes)
-            fill["independent_min_size"] = min(quote["size"] for quote in quotes)
+            fill["independent_min_size"] = min(quote["ask_size"] for quote in quotes)
             fill["independent_full_size"] = fill["independent_min_size"] >= fill["size"]
 
     output = args.output or combo_dir / "kalshi_nfl_combo_economics.parquet"

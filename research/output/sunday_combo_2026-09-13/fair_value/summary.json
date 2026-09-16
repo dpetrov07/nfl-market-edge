@@ -1,0 +1,69 @@
+{
+  "conclusion": [
+    "Standalone midpoint products are sensibly calibrated in aggregate but do not beat the combo trade price as a probability forecast.",
+    "Component premium is not monotonic with seller returns and adds no cross-validated improvement to a price-only linear calibration.",
+    "The frozen cross-game YES below 10 cents result remains the stronger descriptive benchmark on this slate.",
+    "The component model is useful as a sanity check and data-quality feature, not yet as a trading selector."
+  ],
+  "coverage": {
+    "all_cross_game": {
+      "combos": 22571,
+      "contracts": 50913715.32,
+      "fills": 167676
+    },
+    "full_component_book": {
+      "combos": 5460,
+      "contracts": 19295956.22,
+      "fills": 59389
+    },
+    "primary_quality": {
+      "combos": 3629,
+      "contracts": 18484153.62,
+      "fills": 56766
+    },
+    "quotes_at_most_30s_old": {
+      "combos": 4105,
+      "contracts": 18673726.549999997,
+      "fills": 57478
+    }
+  },
+  "future_data": [
+    "Complete pregame and in-game standalone books for every combo leg, synchronized with exchange timestamps.",
+    "Multiple future slates for strictly forward time validation and calibration by leg type.",
+    "Combo bid/ask and RFQ state, not only prints, to measure executable seller capacity and selection.",
+    "Enough repeated same-game leg pairs to estimate joint probabilities before multiplying across games."
+  ],
+  "headline": {
+    "combo_mean_price": 0.21610409412194903,
+    "combo_price_brier": 0.13966603751568205,
+    "component_mean_mid": 0.2139985005251995,
+    "component_mid_brier": 0.1403201442242784,
+    "frozen_benchmark_equal_net": 0.017657304000917744,
+    "mean_settlement": 0.21658859189859467,
+    "positive_premium_equal_net": -0.015533695566856104,
+    "price_only_cv_brier": 0.13844408505225336,
+    "price_plus_component_cv_brier": 0.13846876469086108,
+    "quality_combos": 3629
+  },
+  "mapping_validation": {
+    "all_legs_mapped_combos": 22270,
+    "all_legs_mapped_rate": 0.986664303752603,
+    "cross_game_combos": 22571,
+    "known_leg_settlement_combos": 22571,
+    "settlement_product_match_rate": 1.0
+  },
+  "method": {
+    "component_mapping": "exact standalone Kalshi market ticker and selected side",
+    "fair_values": [
+      "product of selected-side standalone bids",
+      "product of selected-side standalone midpoints",
+      "product of selected-side standalone asks"
+    ],
+    "primary_quality_filter": {
+      "max_leg_spread": 0.05,
+      "max_quote_age_seconds": 30
+    },
+    "quote_rule": "latest top-of-book received no later than the combo fill",
+    "scope": "cross-game combos"
+  }
+}

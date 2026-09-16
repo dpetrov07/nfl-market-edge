@@ -54,6 +54,32 @@ view and observed-volume weighting is the sensitivity check.
 
 ![Candidate tail risk, concentration, and game exposure](research/output/sunday_combo_2026-09-13/candidate-risk-exposure.svg)
 
+### Component fair-value follow-up
+
+Standalone Kalshi legs mapped cleanly for 98.7% of cross-game combos, but only
+3,629 had complete quotes no more than 30 seconds old with leg spreads at most
+5¢. Their component-midpoint product averaged 21.40% against 21.66% settlement,
+but its Brier score (0.14032) was slightly worse than the combo price itself
+(0.13967).
+
+Premium to component value was not a useful seller signal. Positive midpoint
+premium returned -1.55¢ per equal combo versus +1.77¢ for the frozen `<10¢`
+benchmark, and adding component value to a price-only cross-validated model did
+not improve it (0.13847 versus 0.13844 Brier). For now, component pricing is a
+sanity check rather than a selector.
+
+The reusable combo scorer therefore keeps `<10¢` as the shortlist rule, reports
+component fair value only as a diagnostic, and labels confidence as low until it
+has forward-slate validation.
+
+![Combo and component calibration](research/output/sunday_combo_2026-09-13/fair_value/component-calibration.svg)
+
+![Component premium versus seller edge](research/output/sunday_combo_2026-09-13/fair_value/premium-signal.svg)
+
+Improving this requires synchronized full books over multiple future slates,
+combo quotes/RFQs, and enough repeated same-game leg pairs to model joint
+probabilities.
+
 ## Supporting data pipeline
 
 - The Bovada collector records receiving, rushing, and reception prop changes.
