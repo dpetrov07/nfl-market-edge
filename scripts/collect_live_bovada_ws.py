@@ -28,11 +28,11 @@ from collect_live_sportsbook_props import (
     parse_american,
     parse_float,
 )
+from sportsbook_schema import SCHEMA_VERSION, selection_state_record
 
 
 WS_BASE = "wss://services.bovada.lv/services/sports/subscription"
 ET = ZoneInfo("America/New_York")
-SCHEMA_VERSION = 1
 STATUS = {"O": "open", "S": "suspended", "D": "disabled", "U": "unavailable"}
 
 
@@ -174,19 +174,16 @@ class GameCollector:
     def _write(
         self, row: dict, received_at: str, change_type: str, source: str, changed: list[str]
     ) -> None:
-        clean = {key: value for key, value in row.items() if not key.startswith("_")}
-        record = {
-            "schema_version": SCHEMA_VERSION,
-            "record_type": "selection_state",
-            "change_type": change_type,
-            "received_at": received_at,
-            "source": source,
-            "sportsbook": "bovada",
-            "session_id": self.session_id,
-            **self.event,
-            **clean,
-            "changed": changed,
-        }
+        record = selection_state_record(
+            sportsbook="bovada",
+            session_id=self.session_id,
+            received_at=received_at,
+            source=source,
+            change_type=change_type,
+            event=self.event,
+            selection=row,
+            changed=changed,
+        )
         self.handle.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.handle.flush()
         self.records += 1
