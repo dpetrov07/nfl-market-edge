@@ -1,0 +1,20 @@
+{
+  "slate_id": "nfl-2026-09-17-det-buf",
+  "league": "nfl",
+  "date": "2026-09-17",
+  "combo_scope": "same_game",
+  "initial_scan_pages": 5,
+  "events": [
+    {
+      "ticker": "KXNFLGAME-26SEP17DETBUF",
+      "game": "Detroit Lions @ Buffalo Bills"
+    }
+  ],
+  "combo_tickers": [],
+  "sportsbooks": {
+    "enabled": true,
+    "books": ["bovada", "fanduel", "betrivers"],
+    "games": ["Detroit Lions @ Buffalo Bills"],
+    "interval_seconds": 30
+  }
+}

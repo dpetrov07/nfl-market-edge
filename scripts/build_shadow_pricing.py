@@ -261,7 +261,12 @@ def build_decision_rows(
             continue
         combo_legs = combo.get("mve_selected_legs") or []
         games = [leg.get("game") for leg in combo_legs if leg.get("game")]
-        if len(combo_legs) not in {2, 3} or len(set(games)) <= 1:
+        distinct_games = len(set(games))
+        scope = "same_game" if distinct_games == 1 else "cross_game"
+        configured_scope = manifest.get("combo_scope", "cross_game")
+        if len(combo_legs) not in {2, 3} or (
+            configured_scope != "any" and scope != configured_scope
+        ):
             continue
 
         external_legs = []
@@ -303,6 +308,17 @@ def build_decision_rows(
                 max_age_seconds=max_sportsbook_age_seconds,
                 minimum_edge=minimum_edge,
             )
+        if scope == "same_game":
+            external["fair_value_method"] = (
+                "naive_independent_leg_product_not_correlation_adjusted"
+            )
+            external["proposed_yes_sell_price"] = None
+            external["proposed_fee"] = None
+            external["proposed_edge_vs_consensus"] = None
+            reason = "same_game_correlation_not_modeled"
+            if external.get("skip_reason"):
+                reason += ";" + external["skip_reason"]
+            external["skip_reason"] = reason
 
         combo_book = latest(book_histories.get(ticker, []), at)
         component = component_snapshot(combo, book_histories, at)
@@ -336,7 +352,7 @@ def build_decision_rows(
         if benchmark_price is not None:
             frozen = score_snapshot(
                 yes_price=benchmark_price,
-                scope="cross_game",
+                scope=scope,
                 leg_count=len(combo_legs),
                 distinct_leg_games=len(set(games)),
                 component_bid_product=component.get("component_bid_product"),
@@ -364,7 +380,8 @@ def build_decision_rows(
             "rfq_size": number(opportunity.get("contracts")),
             "rfq_target_cost": number(opportunity.get("target_cost_dollars")),
             "leg_count": len(combo_legs),
-            "distinct_leg_games": len(set(games)),
+            "distinct_leg_games": distinct_games,
+            "scope": scope,
             "games": ", ".join(sorted(set(games))),
             "external_fair_value": external.get("fair_value"),
             "external_fair_value_low": external.get("fair_value_low"),

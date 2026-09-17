@@ -27,8 +27,10 @@ SERIES_PROP_TYPES = {
     "KXNFLRSHYDS": "rushing_yards",
     "KXNFLPASSYDS": "passing_yards",
     "KXNFLPASSYARDS": "passing_yards",
+    "KXNFLREC": "receptions",
     "KXNFLRECEPTIONS": "receptions",
     "KXNFLPASSTD": "passing_touchdowns",
+    "KXNFLPASSTDS": "passing_touchdowns",
     "KXNFLPASSINGTDS": "passing_touchdowns",
 }
 

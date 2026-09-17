@@ -106,6 +106,9 @@ NFL_CITY_ALIASES = {
     "was": "washington",
 }
 STOP = False
+PERSISTED_SELECTION_FIELDS = (
+    "line", "american_odds", "decimal_odds", "state", "event_status", "is_live"
+)
 
 
 def utc_now() -> str:
@@ -608,6 +611,7 @@ def source_record(
     errors: list[str],
     elapsed_seconds: float,
     consecutive_failures: int,
+    records_written: int | None = None,
 ) -> dict:
     status = (
         "partial"
@@ -631,10 +635,50 @@ def source_record(
         snapshot_at=snapshot_at,
         elapsed_seconds=round(elapsed_seconds, 3),
         selection_count=len(records),
+        records_written=records_written,
         matched_game_count=len({row["event_id"] for row in records}),
         consecutive_failures=consecutive_failures,
         errors=errors,
     )
+
+
+def records_to_persist(
+    records: list[dict],
+    previous: dict[tuple, tuple],
+    *,
+    refresh: bool,
+) -> list[dict]:
+    """Persist price changes immediately and periodically re-confirm live prices."""
+    output = []
+    for record in records:
+        key = (
+            record["sportsbook"],
+            record["event_id"],
+            record["market_id"],
+            record["selection_id"],
+        )
+        signature = tuple(record.get(field) for field in PERSISTED_SELECTION_FIELDS)
+        prior = previous.get(key)
+        if prior is None:
+            changed = list(PERSISTED_SELECTION_FIELDS)
+            record["change_type"] = "snapshot"
+        elif signature != prior:
+            changed = [
+                field
+                for field, old, new in zip(PERSISTED_SELECTION_FIELDS, prior, signature)
+                if old != new
+            ]
+            record["change_type"] = "update"
+        elif refresh:
+            changed = []
+            record["change_type"] = "refresh"
+        else:
+            previous[key] = signature
+            continue
+        record["changed"] = changed
+        previous[key] = signature
+        output.append(record)
+    return output
 
 
 def append_records(output_dir: Path, records: list[dict], sport: str) -> Path:
@@ -673,6 +717,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--max-polls", type=int)
+    parser.add_argument(
+        "--full-snapshot-seconds",
+        type=float,
+        default=float(os.getenv("SPORTSBOOK_FULL_SNAPSHOT_SECONDS", "90")),
+        help="Re-confirm unchanged selections this often; changes are always immediate",
+    )
     args = parser.parse_args()
     configured_games = os.getenv("SPORTSBOOK_GAMES") or os.getenv(
         "SPORTSBOOK_GAME", ""
@@ -686,6 +736,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("set --slate-id or SLATE_ID")
     if args.interval <= 0:
         parser.error("--interval must be positive")
+    if args.full_snapshot_seconds < args.interval:
+        parser.error("--full-snapshot-seconds must be at least --interval")
     if args.output_dir is None:
         volume = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
         root = Path(
@@ -730,6 +782,8 @@ def main() -> None:
         args.output_dir / "health.json",
     )
     poll_number = consecutive_failures = 0
+    selection_signatures: dict[tuple, tuple] = {}
+    last_full_snapshot = 0.0
     while not STOP:
         cycle_started = time.monotonic()
         poll_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}-{uuid.uuid4().hex[:8]}"
@@ -750,7 +804,18 @@ def main() -> None:
         records = selection_records(
             raw_rows, session_id, args.slate_id, args.sport, snapshot_at
         )
-        consecutive_failures = consecutive_failures + 1 if errors and not records else 0
+        if not records and not errors:
+            errors.append("no_matching_selections")
+        consecutive_failures = consecutive_failures + 1 if not records else 0
+        refresh = (
+            not last_full_snapshot
+            or time.monotonic() - last_full_snapshot >= args.full_snapshot_seconds
+        )
+        persisted = records_to_persist(
+            records, selection_signatures, refresh=refresh
+        )
+        if records and refresh:
+            last_full_snapshot = time.monotonic()
         status = source_record(
             poll_id=poll_id,
             sportsbook=args.book,
@@ -763,10 +828,14 @@ def main() -> None:
             errors=errors,
             elapsed_seconds=time.monotonic() - cycle_started,
             consecutive_failures=consecutive_failures,
+            records_written=len(persisted),
         )
-        path = append_records(args.output_dir, [*records, status], args.sport)
+        path = append_records(args.output_dir, [*persisted, status], args.sport)
         emit_health(status, args.output_dir / "health.json")
-        print(f"saved {len(records)} selections -> {path}", flush=True)
+        print(
+            f"available {len(records)} selections; saved {len(persisted)} -> {path}",
+            flush=True,
+        )
         poll_number += 1
         if args.once or (args.max_polls and poll_number >= args.max_polls):
             break

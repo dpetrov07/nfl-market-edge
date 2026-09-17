@@ -74,6 +74,10 @@ def read_manifest(path: Path | None) -> dict:
         raise ValueError(f"manifest is missing: {', '.join(missing)}")
     if manifest["league"].lower() not in {"nfl", "cfb"}:
         raise ValueError("league must be nfl or cfb")
+    if manifest.get("combo_scope", "cross_game") not in {
+        "cross_game", "same_game", "any"
+    }:
+        raise ValueError("combo_scope must be cross_game, same_game, or any")
     events = {}
     for value in manifest["events"]:
         if isinstance(value, str):
@@ -95,13 +99,18 @@ def selected_legs(row: dict) -> list[dict]:
     return row.get("mve_selected_legs") or row.get("selected_markets") or []
 
 
-def is_slate_combo(row: dict, event_games: dict[str, str]) -> bool:
+def is_slate_combo(
+    row: dict, event_games: dict[str, str], scope: str = "cross_game"
+) -> bool:
     legs = selected_legs(row)
     games = [event_games.get(event_key(leg.get("event_ticker"))) for leg in legs]
+    if len(legs) not in (2, 3) or not all(games):
+        return False
+    distinct_games = len(set(games))
     return (
-        len(legs) in (2, 3)
-        and all(games)
-        and len(set(games)) > 1
+        scope == "any"
+        or (scope == "same_game" and distinct_games == 1)
+        or (scope == "cross_game" and distinct_games > 1)
     )
 
 
@@ -130,6 +139,7 @@ class SlateRegistry:
         self.manifest = manifest
         self.writer = writer
         self.event_games = manifest["event_games"]
+        self.combo_scope = manifest.get("combo_scope", "cross_game")
         self.combos: dict[str, dict] = {}
         self.components: set[str] = set()
         self.component_metadata: set[str] = set()
@@ -146,7 +156,7 @@ class SlateRegistry:
         return None
 
     def add_combo(self, row: dict, source: str) -> list[str]:
-        if not is_slate_combo(row, self.event_games):
+        if not is_slate_combo(row, self.event_games, self.combo_scope):
             return []
         ticker = row.get("ticker") or row.get("market_ticker")
         if not ticker:
@@ -160,7 +170,7 @@ class SlateRegistry:
         ]
         before = self.tickers
         existing = self.combos.get(ticker, {})
-        self.combos[ticker] = {
+        combo = {
             **existing,
             **compact_market(row),
             "ticker": ticker,
@@ -170,16 +180,18 @@ class SlateRegistry:
             or existing.get("mve_collection_ticker"),
             "mve_selected_legs": legs,
         }
+        self.combos[ticker] = combo
         self.components.update(leg["market_ticker"] for leg in legs)
-        self.writer.write(
-            {
-                "record_type": "combo_discovery",
-                "received_at": utc_now(),
-                "source": source,
-                "slate_id": self.manifest["slate_id"],
-                "combo": self.combos[ticker],
-            }
-        )
+        if combo != existing:
+            self.writer.write(
+                {
+                    "record_type": "combo_discovery",
+                    "received_at": utc_now(),
+                    "source": source,
+                    "slate_id": self.manifest["slate_id"],
+                    "combo": combo,
+                }
+            )
         return sorted(self.tickers - before)
 
     def add_component_metadata(self, markets: list[dict]) -> None:
@@ -210,8 +222,10 @@ def open_combo_markets(client: KalshiClient, registry: SlateRegistry) -> list[di
             "limit": 1000,
         },
         "markets",
-        row_filter=lambda row: is_slate_combo(row, registry.event_games),
-        max_pages=2,
+        row_filter=lambda row: is_slate_combo(
+            row, registry.event_games, registry.combo_scope
+        ),
+        max_pages=int(registry.manifest.get("initial_scan_pages", 5)),
     )
     return markets
 
@@ -222,7 +236,9 @@ def open_rfqs(client: KalshiClient, registry: SlateRegistry) -> list[dict]:
         {"status": "open", "limit": 100},
         "rfqs",
         auth=True,
-        row_filter=lambda row: is_slate_combo(row, registry.event_games),
+        row_filter=lambda row: is_slate_combo(
+            row, registry.event_games, registry.combo_scope
+        ),
         max_pages=2,
     )
     return rows
@@ -386,6 +402,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
     seen_fills: set[str] = set()
     fills_received = 0
     fill_api_available = True
+    settled_combos: set[str] = set()
 
     async def poll_fills() -> None:
         nonlocal fill_since, fills_received, fill_api_available
@@ -561,6 +578,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                             combo_count=len(registry.combos),
                             component_count=len(registry.components),
                             books_initialized=len(state.initialized),
+                            settled_combo_count=len(settled_combos),
                             fills_received=fills_received,
                             fill_api_available=fill_api_available,
                             last_message_at=last_message_at,
@@ -585,7 +603,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                     message_type = raw.get("type")
                     if message_type in COMMUNICATION_TYPES:
                         if message_type == "rfq_created" and is_slate_combo(
-                            msg, registry.event_games
+                            msg, registry.event_games, registry.combo_scope
                         ):
                             new_tickers = registry.add_combo(
                                 {**msg, "ticker": msg.get("market_ticker")}, "communications"
@@ -629,6 +647,16 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                     for record in state.process(raw, received_at):
                         record["connection_id"] = connection_id
                         record["market_role"] = registry.role(record.get("market_ticker"))
+                        if (
+                            record["market_role"] == "combo"
+                            and record["record_type"] == "market_status"
+                            and (
+                                record.get("result") in {"yes", "no"}
+                                or record.get("settlement_value_dollars") is not None
+                                or record.get("status") == "settled"
+                            )
+                        ):
+                            settled_combos.add(record["market_ticker"])
                         writer.write(record)
         except asyncio.CancelledError:
             raise

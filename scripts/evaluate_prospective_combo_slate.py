@@ -221,6 +221,12 @@ def evaluate(data_path: Path, output: Path, scored_output: Path) -> pd.DataFrame
     return result
 
 
+def select_scope(settled: pd.DataFrame, configured_scope: str) -> pd.DataFrame:
+    if configured_scope == "any":
+        return settled.copy()
+    return settled[settled.scope == configured_scope].copy()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -245,27 +251,37 @@ def main() -> None:
     settled = finish_fills(fills, settlements)
     if settled.empty:
         raise SystemExit("no settled combo fills in the capture; keep collecting through settlement")
-    cross_game = settled[settled.scope == "cross_game"].copy()
-    if cross_game.empty:
-        raise SystemExit("no settled cross-game combo fills in the capture")
-    cross_game["slate_id"] = manifest["slate_id"]
+    configured_scope = manifest.get("combo_scope", "cross_game")
+    selected = select_scope(settled, configured_scope)
+    if selected.empty:
+        raise SystemExit(f"no settled {configured_scope} combo fills in the capture")
+    selected["slate_id"] = manifest["slate_id"]
     fill_path = output / "fill_values.parquet"
-    cross_game.to_parquet(fill_path, index=False)
+    selected.to_parquet(fill_path, index=False)
     pd.DataFrame(communications).to_parquet(output / "communication_values.parquet", index=False)
-    result = evaluate(
-        fill_path,
-        output / "scorer_evaluation.csv",
-        output / "scored_fills.parquet",
-    )
+    if configured_scope == "cross_game":
+        result = evaluate(
+            fill_path,
+            output / "scorer_evaluation.csv",
+            output / "scored_fills.parquet",
+        )
+    else:
+        result = pd.DataFrame()
     summary = {
         "slate_id": manifest["slate_id"],
+        "scope": configured_scope,
         "raw_capture": str(raw),
         "captured_combo_fills": len(fills),
-        "settled_cross_game_fills": len(cross_game),
-        "settled_combos": int(cross_game.combo_market_ticker.nunique()),
+        "settled_scope_fills": len(selected),
+        "settled_combos": int(selected.combo_market_ticker.nunique()),
         "communications": len(communications),
         "settled_combo_markets": len(settlements),
         "evaluation": result.to_dict("records"),
+        "scorer_note": (
+            None
+            if configured_scope == "cross_game"
+            else "frozen scorer is cross-game-only; same-game fills are retained without a score"
+        ),
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n")
     print(json.dumps({key: value for key, value in summary.items() if key != "evaluation"}))

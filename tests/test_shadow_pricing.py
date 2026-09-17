@@ -4,11 +4,23 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nfl_market_edge.shadow import devig_probability, price_external_combo
+from nfl_market_edge.shadow import component_identity, devig_probability, price_external_combo
 from scripts.build_shadow_pricing import build_decision_rows
 
 
 class ShadowPricingTest(unittest.TestCase):
+    def test_live_kalshi_series_aliases_map_to_sportsbook_props(self):
+        for series, expected in (
+            ("KXNFLREC", "receptions"),
+            ("KXNFLPASSTDS", "passing_touchdowns"),
+        ):
+            leg, error = component_identity(
+                {"event_ticker": f"{series}-GAME", "side": "yes"},
+                {"title": "Josh Allen: 2+", "floor_strike": 1.5},
+            )
+            self.assertIsNone(error)
+            self.assertEqual(leg["prop_type"], expected)
+
     def test_proportional_devig_and_conservative_quote(self):
         self.assertAlmostEqual(devig_probability(2.0, 2.0, "over"), 0.5)
         legs = [
@@ -151,6 +163,56 @@ class ShadowPricingTest(unittest.TestCase):
             self.assertEqual(row["market_midpoint_10s"], 0.25)
             self.assertEqual(row["settlement_value"], 0.0)
             self.assertFalse(row["frozen_below_10c_candidate"])
+
+    def test_same_game_pipeline_keeps_inputs_but_does_not_quote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            kalshi = root / "events.jsonl.gz"
+            legs = [
+                {
+                    "market_ticker": ticker,
+                    "event_ticker": series,
+                    "side": "yes",
+                    "game": "A @ B",
+                }
+                for ticker, series in (
+                    ("LEG-A", "KXNFLRECYDS-GAME-A"),
+                    ("LEG-B", "KXNFLRSHYDS-GAME-A"),
+                )
+            ]
+            self.write(kalshi, [
+                {
+                    "record_type": "combo_discovery",
+                    "received_at": "2026-09-20T12:00:00Z",
+                    "combo": {"ticker": "COMBO", "mve_selected_legs": legs},
+                },
+                {
+                    "record_type": "component_discovery",
+                    "received_at": "2026-09-20T12:00:00Z",
+                    "markets": [
+                        {"ticker": "LEG-A", "title": "Alpha: 50+ receiving yards"},
+                        {"ticker": "LEG-B", "title": "Beta: 40+ rushing yards"},
+                    ],
+                },
+                {
+                    "record_type": "communication",
+                    "communication_type": "rfq_created",
+                    "received_at": "2026-09-20T12:00:10Z",
+                    "market_ticker": "COMBO",
+                    "rfq_id": "RFQ-1",
+                },
+            ])
+
+            rows = build_decision_rows(
+                {"slate_id": "slate-1", "combo_scope": "same_game"},
+                kalshi,
+                [],
+            )
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["scope"], "same_game")
+            self.assertEqual(rows[0]["shadow_action"], "skip")
+            self.assertIn("same_game_correlation_not_modeled", rows[0]["skip_reason"])
 
     @staticmethod
     def top(ticker, at, bid, ask):

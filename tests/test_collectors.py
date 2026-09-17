@@ -10,6 +10,7 @@ from scripts.collect_live_combo_slate import (
     subscribe_market_data,
 )
 from scripts.collect_live_sportsbook_props import selection_records
+from scripts.collect_live_sportsbook_props import records_to_persist
 
 
 class CollectorTest(unittest.TestCase):
@@ -33,6 +34,8 @@ class CollectorTest(unittest.TestCase):
 
         self.assertFalse(is_slate_combo(same_game, event_games))
         self.assertTrue(is_slate_combo(cross_game, event_games))
+        self.assertTrue(is_slate_combo(same_game, event_games, "same_game"))
+        self.assertFalse(is_slate_combo(cross_game, event_games, "same_game"))
 
     def test_poll_quotes_expand_to_normalized_selections(self):
         rows = [{
@@ -66,6 +69,34 @@ class CollectorTest(unittest.TestCase):
         self.assertTrue(all(row["slate_id"] == "slate-1" for row in records))
         for row in records:
             validate_selection_state(row)
+
+    def test_unchanged_selections_are_periodically_refreshed(self):
+        record = {
+            "sportsbook": "fanduel",
+            "event_id": "event-1",
+            "market_id": "market-1",
+            "selection_id": "selection-1",
+            "line": 50.5,
+            "american_odds": -110,
+            "decimal_odds": 1.91,
+            "state": "open",
+            "event_status": "scheduled",
+            "is_live": False,
+        }
+        previous = {}
+
+        first = records_to_persist([{**record}], previous, refresh=True)
+        duplicate = records_to_persist([{**record}], previous, refresh=False)
+        refresh = records_to_persist([{**record}], previous, refresh=True)
+        changed = records_to_persist(
+            [{**record, "american_odds": -105}], previous, refresh=False
+        )
+
+        self.assertEqual(first[0]["change_type"], "snapshot")
+        self.assertEqual(duplicate, [])
+        self.assertEqual(refresh[0]["change_type"], "refresh")
+        self.assertEqual(changed[0]["change_type"], "update")
+        self.assertEqual(changed[0]["changed"], ["american_odds"])
 
     def test_local_runner_starts_one_worker_per_source(self):
         manifest = {
