@@ -1,7 +1,12 @@
 import argparse
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from nfl_market_edge.kalshi import load_private_key
 from nfl_market_edge.sportsbook import validate_selection_state
 from scripts.collect_combo_slate import commands
 from scripts.collect_live_combo_slate import (
@@ -14,6 +19,21 @@ from scripts.collect_live_sportsbook_props import records_to_persist
 
 
 class CollectorTest(unittest.TestCase):
+    def test_kalshi_private_key_loads_from_raw_pem(self):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+
+        with patch.dict("os.environ", {"KALSHI_PRIVATE_KEY": pem}, clear=True):
+            loaded = load_private_key(argparse.Namespace(private_key_path=None))
+
+        self.assertEqual(
+            loaded.public_key().public_numbers(), key.public_key().public_numbers()
+        )
+
     def test_cross_game_filter_uses_game_suffix_not_series(self):
         event_games = {
             "26SEP20MINCHI": "MIN @ CHI",

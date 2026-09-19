@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import os
 import re
 import sys
@@ -274,8 +273,8 @@ def load_local_env(path: Path = Path(".env")) -> None:
         return
     text = path.read_text()
     keys = (
-        "KALSHI_API_KEY_ID", "KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PEM",
-        "KALSHI_PRIVATE_KEY_B64", "KALSHI_PRIVATE_KEY_PATH", "KALSHI_GAME",
+        "KALSHI_API_KEY_ID", "KALSHI_PRIVATE_KEY", "KALSHI_PRIVATE_KEY_PATH",
+        "KALSHI_GAME",
         "KALSHI_GAMES", "KALSHI_GAME_DATE", "KALSHI_OUTPUT_DIR",
         "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS", "KALSHI_TOP_SIZE_CHANGE",
         "SLATE_MANIFEST_JSON", "COLLECTOR_OUTPUT_ROOT",
@@ -299,24 +298,15 @@ def load_local_env(path: Path = Path(".env")) -> None:
 
 
 def load_private_key(args: argparse.Namespace):
-    value = os.getenv("KALSHI_PRIVATE_KEY_PEM") or os.getenv("KALSHI_PRIVATE_KEY")
-    if value and "BEGIN" in value:
+    value = os.getenv("KALSHI_PRIVATE_KEY")
+    if value:
         pem_bytes = value.replace("\\n", "\n").encode()
     else:
-        path = args.private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH") or value
+        path = args.private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH")
         if path:
             pem_bytes = Path(path).expanduser().read_bytes()
         else:
-            encoded = os.getenv("KALSHI_PRIVATE_KEY_B64")
-            if not encoded:
-                raise SystemExit(
-                    "set KALSHI_PRIVATE_KEY, KALSHI_PRIVATE_KEY_PATH, or "
-                    "KALSHI_PRIVATE_KEY_B64"
-                )
-            try:
-                pem_bytes = base64.b64decode(encoded, validate=True)
-            except (binascii.Error, ValueError) as exc:
-                raise SystemExit("KALSHI_PRIVATE_KEY_B64 is not valid base64") from exc
+            raise SystemExit("set KALSHI_PRIVATE_KEY or KALSHI_PRIVATE_KEY_PATH")
     return serialization.load_pem_private_key(pem_bytes, password=None)
 
 
