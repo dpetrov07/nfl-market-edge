@@ -7,7 +7,7 @@ import gzip
 import json
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 

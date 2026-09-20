@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import websockets
 from curl_cffi import requests
 
-from nfl_market_edge.sportsbook import SCHEMA_VERSION, selection_state_record
+from nfl_market_edge.sportsbook import selection_state_record
 from scripts.collect_live_sportsbook_props import (
     BOVADA_URL,
     bovada_prop_markets,
