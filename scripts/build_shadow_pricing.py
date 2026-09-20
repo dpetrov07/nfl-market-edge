@@ -17,12 +17,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 from nfl_market_edge.combo import fee_per_contract, score_snapshot
 from nfl_market_edge.shadow import (
+    INTERPOLATION_UNCERTAINTY,
+    LEG_UNCERTAINTY,
     MAX_SPORTSBOOK_AGE_SECONDS,
     MIN_BOOKS_PER_LEG,
     MIN_SELLER_EDGE,
+    ONE_WAY_UNCERTAINTY,
     SUPPORTED_BOOKS,
     component_identity,
     devig_probability,
+    implied_probability,
     normalize_player,
     price_external_combo,
 )
@@ -55,8 +59,17 @@ def number(value) -> float | None:
 def read_jsonl(paths: list[Path]):
     for path in paths:
         with gzip.open(path, "rt", encoding="utf-8") as handle:
-            for line in handle:
-                yield json.loads(line)
+            while True:
+                try:
+                    line = handle.readline()
+                except EOFError:
+                    break
+                if not line:
+                    break
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    break
 
 
 def latest(history: list[tuple[datetime, dict]], at: datetime) -> dict | None:
@@ -65,11 +78,24 @@ def latest(history: list[tuple[datetime, dict]], at: datetime) -> dict | None:
 
 
 class SportsbookHistory:
-    """As-of lookup for exact player, prop, line, and two-sided book markets."""
+    """As-of lookup with exact prices preferred over nearby alt-line estimates."""
+
+    MAX_INTERPOLATION_SPAN = {
+        "passing_yards": 50.0,
+        "receiving_yards": 30.0,
+        "rushing_yards": 30.0,
+        "receptions": 3.0,
+        "passing_touchdowns": 2.0,
+        "passing_interceptions": 2.0,
+        "spread": 10.0,
+        "game_total": 10.0,
+        "team_total": 10.0,
+    }
 
     def __init__(self, paths: list[Path], slate_id: str):
         self.histories = defaultdict(list)
         self.candidates = defaultdict(set)
+        self.lines = defaultdict(set)
         for row in read_jsonl(paths):
             if row.get("record_type") != "selection_state":
                 continue
@@ -89,39 +115,113 @@ class SportsbookHistory:
             key = (*base, book, str(market_id), side)
             self.histories[key].append((at, {**row, "_at": at}))
             self.candidates[base].add((book, str(market_id)))
+            self.lines[(player_key, row["prop_type"], book)].add(round(line, 3))
         for history in self.histories.values():
             history.sort(key=lambda item: item[0])
 
-    def quotes(self, leg: dict, at: datetime) -> list[dict]:
-        base = (leg["player_key"], leg["prop_type"], round(leg["line"], 3))
-        by_book = {}
-        for book, market_id in self.candidates.get(base, ()):
+    def _quote_at(self, leg: dict, at: datetime, book: str, line: float) -> dict | None:
+        base = (leg["player_key"], leg["prop_type"], round(line, 3))
+        best = None
+        for candidate_book, market_id in self.candidates.get(base, ()):
+            if candidate_book != book:
+                continue
             over = latest(self.histories[(*base, book, market_id, "over")], at)
             under = latest(self.histories[(*base, book, market_id, "under")], at)
-            if not over or not under:
-                continue
-            if over.get("state") != "open" or under.get("state") != "open":
-                continue
+            over = over if over and over.get("state") == "open" else None
+            under = under if under and under.get("state") == "open" else None
+            selected = over if leg["sportsbook_side"] == "over" else under
+            opposite = under if leg["sportsbook_side"] == "over" else over
+            method = "exact_two_way"
+            uncertainty = 0.0
             probability = devig_probability(
-                number(over.get("decimal_odds")),
-                number(under.get("decimal_odds")),
+                number(over.get("decimal_odds")) if over else None,
+                number(under.get("decimal_odds")) if under else None,
                 leg["sportsbook_side"],
             )
+            if probability is None and selected:
+                probability = number(selected.get("fair_probability"))
+                method = "exact_multiway_devig"
+                uncertainty = LEG_UNCERTAINTY
+            if probability is None and opposite:
+                fair = number(opposite.get("fair_probability"))
+                if fair is not None:
+                    probability = 1 - fair
+                    method = "exact_multiway_devig"
+                    uncertainty = LEG_UNCERTAINTY
+            if probability is None and selected:
+                probability = implied_probability(number(selected.get("decimal_odds")))
+                method = "exact_one_way"
+                uncertainty = ONE_WAY_UNCERTAINTY
+            if probability is None and opposite:
+                raw = implied_probability(number(opposite.get("decimal_odds")))
+                probability = 1 - raw if raw is not None else None
+                method = "exact_one_way_complement"
+                uncertainty = ONE_WAY_UNCERTAINTY
             if probability is None:
                 continue
-            age = max((at - over["_at"]).total_seconds(), (at - under["_at"]).total_seconds())
+            used = [row for row in (over, under) if row]
+            age = max((at - row["_at"]).total_seconds() for row in used)
             candidate = {
                 "sportsbook": book,
                 "market_id": market_id,
-                "game": over.get("game") or under.get("game"),
-                "over_decimal_odds": number(over.get("decimal_odds")),
-                "under_decimal_odds": number(under.get("decimal_odds")),
+                "game": next((row.get("game") for row in used if row.get("game")), None),
+                "line": line,
+                "over_decimal_odds": number(over.get("decimal_odds")) if over else None,
+                "under_decimal_odds": number(under.get("decimal_odds")) if under else None,
                 "devig_probability": probability,
+                "price_method": method,
+                "probability_uncertainty": uncertainty,
                 "age_seconds": age,
-                "observed_at": max(over["_at"], under["_at"]).isoformat(),
+                "observed_at": max(row["_at"] for row in used).isoformat(),
             }
-            if book not in by_book or age < by_book[book]["age_seconds"]:
-                by_book[book] = candidate
+            if best is None or age < best["age_seconds"]:
+                best = candidate
+        return best
+
+    def quotes(self, leg: dict, at: datetime) -> list[dict]:
+        target = round(leg["line"], 3)
+        by_book = {}
+        for book in SUPPORTED_BOOKS:
+            exact = self._quote_at(leg, at, book, target)
+            if exact:
+                by_book[book] = exact
+                continue
+            available = sorted(
+                self.lines.get((leg["player_key"], leg["prop_type"], book), ())
+            )
+            lower = max((line for line in available if line < target), default=None)
+            upper = min((line for line in available if line > target), default=None)
+            maximum_span = self.MAX_INTERPOLATION_SPAN.get(leg["prop_type"])
+            if (
+                lower is None
+                or upper is None
+                or maximum_span is None
+                or upper - lower > maximum_span
+            ):
+                continue
+            low_quote = self._quote_at(leg, at, book, lower)
+            high_quote = self._quote_at(leg, at, book, upper)
+            if not low_quote or not high_quote:
+                continue
+            weight = (target - lower) / (upper - lower)
+            probability = low_quote["devig_probability"] + weight * (
+                high_quote["devig_probability"] - low_quote["devig_probability"]
+            )
+            by_book[book] = {
+                "sportsbook": book,
+                "market_id": None,
+                "game": low_quote.get("game") or high_quote.get("game"),
+                "line": target,
+                "source_lines": [lower, upper],
+                "devig_probability": probability,
+                "price_method": "interpolated_alt_lines",
+                "probability_uncertainty": max(
+                    low_quote["probability_uncertainty"],
+                    high_quote["probability_uncertainty"],
+                ) + INTERPOLATION_UNCERTAINTY,
+                "age_seconds": max(low_quote["age_seconds"], high_quote["age_seconds"]),
+                "observed_at": max(low_quote["observed_at"], high_quote["observed_at"]),
+            }
         return [by_book[book] for book in SUPPORTED_BOOKS if book in by_book]
 
 

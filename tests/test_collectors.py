@@ -3,7 +3,12 @@ import unittest
 from nfl_market_edge.kalshi import MarketState
 from nfl_market_edge.sportsbook import validate_selection_state
 from scripts.collect_live_combo_slate import is_slate_combo, subscribe_market_data
-from scripts.collect_live_sportsbook_props import records_to_persist, selection_records
+from scripts.collect_live_sportsbook_props import (
+    fanduel_runner_line,
+    fanduel_runner_subject,
+    records_to_persist,
+    selection_records,
+)
 
 
 class CollectorTest(unittest.TestCase):
@@ -90,6 +95,12 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(refresh[0]["change_type"], "refresh")
         self.assertEqual(changed[0]["change_type"], "update")
         self.assertEqual(changed[0]["changed"], ["american_odds"])
+
+    def test_fanduel_alternate_line_comes_from_runner_name(self):
+        runner = {"handicap": 0, "runnerName": "Chicago Bears (+3.5)"}
+
+        self.assertEqual(fanduel_runner_line(runner), 3.5)
+        self.assertEqual(fanduel_runner_subject(runner), "Chicago Bears")
 
     def test_market_state_dedupes_snapshots_and_trade_ids(self):
         state = MarketState(["ticker"])

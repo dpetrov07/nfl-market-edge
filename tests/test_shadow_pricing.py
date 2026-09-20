@@ -18,6 +18,21 @@ class ShadowPricingTest(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(leg["prop_type"], "passing_touchdowns")
 
+    def test_game_line_uses_full_team_from_leg_game(self):
+        leg, error = component_identity(
+            {
+                "event_ticker": "KXNFLSPREAD-GAME",
+                "side": "yes",
+                "game": "Philadelphia Eagles @ Tennessee Titans",
+            },
+            {"yes_sub_title": "Philadelphia wins by over 6.5 points", "floor_strike": 6.5},
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(leg["player_key"], "philadelphiaeagles")
+        self.assertEqual(leg["prop_type"], "spread")
+        self.assertEqual(leg["line"], 6.5)
+
     def test_two_books_produce_a_conservative_quote(self):
         legs = [
             {
@@ -51,6 +66,22 @@ class ShadowPricingTest(unittest.TestCase):
         self.assertIsNone(result["proposed_yes_sell_price"])
         self.assertEqual(result["skip_reason"], "leg_1_only_1_book")
 
+    def test_quote_specific_uncertainty_widens_the_leg_range(self):
+        result = price_external_combo(
+            [{"book_quotes": [
+                {
+                    "sportsbook": book,
+                    "devig_probability": 0.5,
+                    "probability_uncertainty": 0.03,
+                    "age_seconds": 5,
+                }
+                for book in ("bovada", "fanduel")
+            ]}]
+        )
+
+        self.assertAlmostEqual(result["fair_value_low"], 0.46)
+        self.assertAlmostEqual(result["fair_value_high"], 0.54)
+
     def test_sportsbook_history_does_not_look_past_the_rfq(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "book.jsonl.gz"
@@ -77,6 +108,38 @@ class ShadowPricingTest(unittest.TestCase):
 
         self.assertEqual(len(quotes), 1)
         self.assertAlmostEqual(quotes[0]["devig_probability"], 0.5)
+        self.assertEqual(quotes[0]["price_method"], "exact_two_way")
+
+    def test_sportsbook_history_interpolates_surrounding_alt_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "book.jsonl.gz"
+            rows = [
+                self.selection(
+                    "over",
+                    odds,
+                    "2026-09-20T12:00:00Z",
+                    line=line,
+                    market_id=f"market-{line}",
+                )
+                for line, odds in ((39.5, 1.5), (49.5, 2.5))
+            ]
+            self.write(path, rows)
+            history = SportsbookHistory([path], "slate-1")
+
+            quotes = history.quotes(
+                {
+                    "player_key": "player",
+                    "prop_type": "receiving_yards",
+                    "line": 44.5,
+                    "sportsbook_side": "over",
+                },
+                parse_time("2026-09-20T12:00:10Z"),
+            )
+
+        self.assertEqual(quotes[0]["price_method"], "interpolated_alt_lines")
+        self.assertEqual(quotes[0]["source_lines"], [39.5, 49.5])
+        self.assertAlmostEqual(quotes[0]["devig_probability"], (1 / 1.5 + 1 / 2.5) / 2)
+        self.assertAlmostEqual(quotes[0]["probability_uncertainty"], 0.05)
 
     def test_same_game_pipeline_never_quotes(self):
         legs = [
@@ -117,7 +180,7 @@ class ShadowPricingTest(unittest.TestCase):
         self.assertIn("same_game_correlation_not_modeled", rows[0]["skip_reason"])
 
     @staticmethod
-    def selection(side, decimal_odds, received_at):
+    def selection(side, decimal_odds, received_at, *, line=49.5, market_id="market"):
         return {
             "record_type": "selection_state",
             "slate_id": "slate-1",
@@ -125,9 +188,9 @@ class ShadowPricingTest(unittest.TestCase):
             "sportsbook": "bovada",
             "player": "Player",
             "prop_type": "receiving_yards",
-            "line": 49.5,
+            "line": line,
             "side": side,
-            "market_id": "market",
+            "market_id": market_id,
             "decimal_odds": decimal_odds,
             "state": "open",
         }

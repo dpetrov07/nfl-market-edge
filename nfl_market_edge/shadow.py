@@ -14,15 +14,24 @@ SUPPORTED_BOOKS = ("bovada", "fanduel", "betrivers")
 MAX_SPORTSBOOK_AGE_SECONDS = 120.0
 MIN_BOOKS_PER_LEG = 2
 LEG_UNCERTAINTY = 0.01
+ONE_WAY_UNCERTAINTY = 0.03
+INTERPOLATION_UNCERTAINTY = 0.02
 STALE_BUFFER_AT_LIMIT = 0.01
 MIN_SELLER_EDGE = 0.01
 PLAYER_ALIASES = {
     "joshuapalmer": "joshpalmer",
     "kennygainwell": "kennethgainwell",
     "hollywoodbrown": "marquisebrown",
+    "notouchdownscorer": "notouchdown",
 }
 
 SERIES_PROP_TYPES = {
+    "KXNFLGAME": "moneyline",
+    "KXNFLSPREAD": "spread",
+    "KXNFLTOTAL": "game_total",
+    "KXNFLTEAMTOTAL": "team_total",
+    "KXNFLTD": "anytime_touchdown",
+    "KXNFLFIRSTTD": "first_touchdown",
     "KXNFLRECYDS": "receiving_yards",
     "KXNFLRSHYDS": "rushing_yards",
     "KXNFLPASSYDS": "passing_yards",
@@ -32,6 +41,7 @@ SERIES_PROP_TYPES = {
     "KXNFLPASSTD": "passing_touchdowns",
     "KXNFLPASSTDS": "passing_touchdowns",
     "KXNFLPASSINGTDS": "passing_touchdowns",
+    "KXNFLPASSINT": "passing_interceptions",
 }
 
 
@@ -42,6 +52,16 @@ def normalize_player(value: str | None) -> str:
         parts.pop()
     key = "".join(parts)
     return PLAYER_ALIASES.get(key, key)
+
+
+def game_subject(value: str, game: str | None) -> str:
+    """Expand city-only Kalshi labels to the sportsbook's full team name."""
+    key = normalize_player(value)
+    for team in re.split(r"\s+@\s+|\s+vs\.?\s+", game or "", flags=re.I):
+        team_key = normalize_player(team)
+        if key and (key in team_key or team_key in key):
+            return team.strip()
+    return value.strip()
 
 
 def implied_probability(decimal_odds: float | None) -> float | None:
@@ -65,7 +85,7 @@ def devig_probability(
 
 
 def component_identity(leg: dict, market: dict) -> tuple[dict | None, str | None]:
-    """Extract the exact sportsbook player/prop/line represented by a Kalshi leg."""
+    """Extract the sportsbook subject, market type, and line for a Kalshi leg."""
     event_ticker = leg.get("event_ticker") or market.get("event_ticker") or ""
     series = event_ticker.split("-", 1)[0]
     title = market.get("title") or market.get("yes_sub_title") or ""
@@ -87,6 +107,13 @@ def component_identity(leg: dict, market: dict) -> tuple[dict | None, str | None
     player = market.get("player")
     if not player:
         player = (market.get("yes_sub_title") or title).split(":", 1)[0].strip()
+    if prop_type in {"moneyline", "spread", "team_total"}:
+        player = re.split(
+            r"\s+(?:wins?|over|under)\b", player, maxsplit=1, flags=re.I
+        )[0]
+        player = game_subject(player, leg.get("game"))
+    elif prop_type == "game_total":
+        player = "Full Game"
     if not normalize_player(player):
         return None, "missing_component_player"
 
@@ -102,6 +129,8 @@ def component_identity(leg: dict, market: dict) -> tuple[dict | None, str | None
             threshold = float(strike)
         except (TypeError, ValueError):
             threshold = None
+    if threshold is None and prop_type in {"moneyline", "first_touchdown"}:
+        threshold = 0.0 if prop_type == "moneyline" else 0.5
     if threshold is None:
         return None, "missing_component_threshold"
 
@@ -156,6 +185,7 @@ def price_external_combo(
             if quote.get("devig_probability") is not None
         ]
         probabilities = [quote["devig_probability"] for quote in quotes]
+        uncertainties = [quote.get("probability_uncertainty", 0.0) for quote in quotes]
         ages = [quote["age_seconds"] for quote in quotes]
         detail = {
             **{key: value for key, value in leg.items() if key != "book_quotes"},
@@ -166,10 +196,22 @@ def price_external_combo(
             "consensus_probability": statistics.median(probabilities)
             if probabilities
             else None,
-            "fair_low": max(0.0, min(probabilities) - leg_uncertainty)
+            "fair_low": max(
+                0.0,
+                min(
+                    probability - uncertainty
+                    for probability, uncertainty in zip(probabilities, uncertainties)
+                ) - leg_uncertainty,
+            )
             if probabilities
             else None,
-            "fair_high": min(1.0, max(probabilities) + leg_uncertainty)
+            "fair_high": min(
+                1.0,
+                max(
+                    probability + uncertainty
+                    for probability, uncertainty in zip(probabilities, uncertainties)
+                ) + leg_uncertainty,
+            )
             if probabilities
             else None,
         }
@@ -217,7 +259,7 @@ def price_external_combo(
         "fair_value": fair_value,
         "fair_value_low": fair_low,
         "fair_value_high": fair_high,
-        "fair_value_method": "median_two_way_devig_then_independent_leg_product",
+        "fair_value_method": "median_sportsbook_probability_then_independent_leg_product",
         "stale_probability_buffer": stale_buffer,
         "conservative_probability": conservative_probability,
         "minimum_desired_edge": minimum_edge,

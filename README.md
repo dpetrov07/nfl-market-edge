@@ -98,11 +98,15 @@ Captures land under `data/live/combo_slates/<slate_id>/`; evaluation results go
 to `research/output/<slate_id>/prospective/`. The shadow-pricing command can run
 before settlement and writes CSV/Parquet decisions plus a summary under
 `research/output/<slate_id>/shadow/`. Each row is one cross-game RFQ joined only
-to prices received by that timestamp. It uses the median two-way de-vigged
-probability from the available sportsbooks for each exact player/prop/line,
-multiplies the legs, widens the range for disagreement and freshness, and logs a
-whole-cent YES sale price that covers estimated fees and a 1¢ minimum edge. It
-requires two books per leg by default and never submits a quote. Re-running it
+to prices received by that timestamp. Exact two-way game and player lines are
+preferred and de-vigged. Complete first-TD markets are normalized across all
+outcomes; one-way anytime-TD and alternate player lines carry an extra
+uncertainty buffer. When an exact threshold is unavailable, nearby surrounding
+alternate lines may be interpolated with a further buffer. Per-book estimates
+are combined by median, multiplied across legs, widened for disagreement and
+freshness, and converted to a whole-cent YES sale price covering fees and a 1¢
+minimum edge. It requires two books per leg by default and never submits a
+quote. Re-running it
 after settlement adds hypothetical P&L and keeps the frozen `<10¢` rule as a
 separate comparison.
 

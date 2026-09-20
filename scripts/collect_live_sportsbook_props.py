@@ -53,6 +53,12 @@ BOVADA_PROPS = {
     "Alternate Receiving Yards": "receiving_yards",
     "Alternate Rushing Yards": "rushing_yards",
     "Alternate Receptions": "receptions",
+    "Total Passing Yards": "passing_yards",
+    "Alternate Passing Yards": "passing_yards",
+    "Total Passing Touchdowns": "passing_touchdowns",
+    "Alternate Passing Touchdowns": "passing_touchdowns",
+    "Total Interceptions Thrown": "passing_interceptions",
+    "Alternate Interceptions Thrown": "passing_interceptions",
 }
 FANDUEL_PROPS = {
     "Receiving Yds": ("receiving_yards", False),
@@ -65,6 +71,8 @@ FANDUEL_PROPS = {
     "Alt Passing Yds": ("passing_yards", True),
     "Passing TDs": ("passing_touchdowns", False),
     "Alt Passing TDs": ("passing_touchdowns", True),
+    "Passing Interceptions": ("passing_interceptions", False),
+    "Alt Passing Interceptions": ("passing_interceptions", True),
 }
 BETRIVERS_PROPS = {
     "Receiving Yards": "receiving_yards",
@@ -72,6 +80,7 @@ BETRIVERS_PROPS = {
     "Receptions": "receptions",
     "Passing Yards": "passing_yards",
     "Touchdown Passes": "passing_touchdowns",
+    "Interceptions Thrown": "passing_interceptions",
 }
 NFL_CITY_ALIASES = {
     "ari": "arizona",
@@ -107,7 +116,8 @@ NFL_CITY_ALIASES = {
 }
 STOP = False
 PERSISTED_SELECTION_FIELDS = (
-    "line", "american_odds", "decimal_odds", "state", "event_status", "is_live"
+    "line", "american_odds", "decimal_odds", "fair_probability", "state",
+    "event_status", "is_live",
 )
 
 
@@ -142,6 +152,9 @@ def decimal_from_american(value: int | None) -> float | None:
 
 def normalize_game(value: str) -> str:
     value = re.sub(r"\(\d+\)", "", value.lower()).replace("(fl)", " florida")
+    value = value.replace("ny jets", "new york jets").replace(
+        "ny giants", "new york giants"
+    )
     for abbreviation, city in NFL_CITY_ALIASES.items():
         value = re.sub(rf"\b{abbreviation}\b", city, value)
     value = value.replace("los angeles", "la")
@@ -158,6 +171,48 @@ def iso_from_epoch_ms(value) -> str | None:
         return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).isoformat()
     except (TypeError, ValueError, OSError):
         return None
+
+
+def quote_row(
+    base: dict,
+    *,
+    prop_type: str,
+    player: str,
+    market_id,
+    threshold: float,
+    over: dict | None = None,
+    under: dict | None = None,
+    is_alternate: bool = False,
+) -> dict:
+    """Build the paired row consumed by the shared selection normalizer."""
+    over, under = over or {}, under or {}
+    return {
+        **base,
+        "player": player,
+        "player_id": over.get("player_id") or under.get("player_id"),
+        "player_team": over.get("player_team") or under.get("player_team"),
+        "market_type": prop_type,
+        "prop_type": prop_type,
+        "is_alternate": is_alternate,
+        "market_id": str(market_id),
+        "threshold": threshold,
+        "over_odds": over.get("american_odds"),
+        "under_odds": under.get("american_odds"),
+        "over_selection_id": over.get("selection_id"),
+        "under_selection_id": under.get("selection_id"),
+        "over_fair_probability": over.get("fair_probability"),
+        "under_fair_probability": under.get("fair_probability"),
+    }
+
+
+def multiway_fair_probabilities(outcomes: list[dict]) -> dict[str, float]:
+    implied = {
+        str(outcome["selection_id"]): 1 / outcome["decimal_odds"]
+        for outcome in outcomes
+        if outcome.get("selection_id") and outcome.get("decimal_odds", 0) > 1
+    }
+    total = sum(implied.values())
+    return {key: value / total for key, value in implied.items()} if total else {}
 
 
 def bovada_teams(event: dict) -> tuple[dict, dict]:
@@ -244,6 +299,23 @@ def fetch_bovada(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict
         if not game_matches(event.get("description", ""), game):
             continue
         away, home = bovada_teams(event)
+        base_record = {
+            "record_type": "quote",
+            "schema_version": SCHEMA_VERSION,
+            "poll_id": poll_id,
+            "sportsbook": "bovada",
+            "fetched_at": fetched_at,
+            "source_update_at": iso_from_epoch_ms(event.get("lastModified")),
+            "game": event.get("description"),
+            "event_id": str(event.get("id")),
+            "scheduled_start": iso_from_epoch_ms(event.get("startTime")),
+            "event_status": event.get("status"),
+            "is_live": bool(event.get("live")),
+            "away_team": away.get("name"),
+            "away_team_id": str(away.get("id")) if away.get("id") else None,
+            "home_team": home.get("name"),
+            "home_team_id": str(home.get("id")) if home.get("id") else None,
+        }
         prop_markets = {
             item["market_id"]: item for item in bovada_prop_markets(event)
         }
@@ -252,46 +324,89 @@ def fetch_bovada(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict
                 if market.get("status") != "O":
                     continue
                 description = market.get("description", "")
-                market_type = {"Moneyline": "moneyline", "Point Spread": "spread"}.get(description)
-                if market_type and market.get("period", {}).get("main"):
+                market_type = {
+                    "Moneyline": "moneyline",
+                    "Point Spread": "spread",
+                    "Spread": "spread",
+                    "Total": "game_total",
+                }.get(description)
+                if market_type and market.get("period", {}).get("description") == "Game":
                     sides = {
                         str(outcome.get("type", "")).lower(): outcome
                         for outcome in market.get("outcomes", [])
                         if outcome.get("status") == "O"
                     }
                     away_selection, home_selection = sides.get("a", {}), sides.get("h", {})
-                    rows.append(
-                        {
-                            "record_type": "quote",
-                            "schema_version": SCHEMA_VERSION,
-                            "poll_id": poll_id,
-                            "sportsbook": "bovada",
-                            "fetched_at": fetched_at,
-                            "source_update_at": iso_from_epoch_ms(event.get("lastModified")),
-                            "game": event.get("description"),
-                            "event_id": str(event.get("id")),
-                            "scheduled_start": iso_from_epoch_ms(event.get("startTime")),
-                            "event_status": event.get("status"),
-                            "is_live": bool(event.get("live")),
-                            "away_team": away.get("name"),
-                            "away_team_id": str(away.get("id")) if away.get("id") else None,
-                            "home_team": home.get("name"),
-                            "home_team_id": str(home.get("id")) if home.get("id") else None,
-                            "market_type": market_type,
-                            "prop_type": None,
-                            "market_id": str(market.get("id")),
-                            "away_line": parse_float(away_selection.get("price", {}).get("handicap")),
-                            "home_line": parse_float(home_selection.get("price", {}).get("handicap")),
-                            "away_odds": parse_american(away_selection.get("price", {}).get("american")),
-                            "home_odds": parse_american(home_selection.get("price", {}).get("american")),
-                            "away_selection_id": str(away_selection.get("id"))
-                            if away_selection.get("id")
-                            else None,
-                            "home_selection_id": str(home_selection.get("id"))
-                            if home_selection.get("id")
-                            else None,
-                        }
+                    if market_type == "game_total":
+                        over_selection, under_selection = sides.get("o", {}), sides.get("u", {})
+                        line = parse_float(over_selection.get("price", {}).get("handicap"))
+                        if line is not None:
+                            rows.append(quote_row(
+                                base_record,
+                                prop_type=market_type,
+                                player="Full Game",
+                                market_id=market.get("id"),
+                                threshold=line,
+                                over={
+                                    "selection_id": str(over_selection.get("id")),
+                                    "american_odds": parse_american(over_selection.get("price", {}).get("american")),
+                                },
+                                under={
+                                    "selection_id": str(under_selection.get("id")),
+                                    "american_odds": parse_american(under_selection.get("price", {}).get("american")),
+                                },
+                                is_alternate=not market.get("period", {}).get("main", False),
+                            ))
+                    elif away_selection and home_selection:
+                        selections = ((away_selection, home_selection, away), (home_selection, away_selection, home))
+                        for selected, opposite, team in selections:
+                            handicap = parse_float(selected.get("price", {}).get("handicap")) or 0.0
+                            rows.append(quote_row(
+                                base_record,
+                                prop_type=market_type,
+                                player=team.get("name") or selected.get("description", ""),
+                                market_id=market.get("id"),
+                                threshold=-handicap if market_type == "spread" else 0.0,
+                                over={
+                                    "selection_id": str(selected.get("id")),
+                                    "american_odds": parse_american(selected.get("price", {}).get("american")),
+                                },
+                                under={
+                                    "selection_id": str(opposite.get("id")),
+                                    "american_odds": parse_american(opposite.get("price", {}).get("american")),
+                                },
+                                is_alternate=description == "Spread",
+                            ))
+                    continue
+                if description in {"Anytime Touchdown Scorer", "First Touchdown Scorer"}:
+                    scorer_type = (
+                        "anytime_touchdown"
+                        if description.startswith("Anytime")
+                        else "first_touchdown"
                     )
+                    selections = []
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("status") != "O":
+                            continue
+                        player_text = outcome.get("description", "")
+                        selections.append({
+                            "player": re.sub(r"\s+\([^)]+\)\s*$", "", player_text).strip(),
+                            "player_team": (re.search(r"\s+\(([^)]+)\)\s*$", player_text) or [None, None])[1],
+                            "selection_id": str(outcome.get("id")),
+                            "american_odds": parse_american(outcome.get("price", {}).get("american")),
+                            "decimal_odds": parse_float(outcome.get("price", {}).get("decimal")),
+                        })
+                    fair = multiway_fair_probabilities(selections) if scorer_type == "first_touchdown" else {}
+                    for selection in selections:
+                        selection["fair_probability"] = fair.get(selection["selection_id"])
+                        rows.append(quote_row(
+                            base_record,
+                            prop_type=scorer_type,
+                            player=selection.pop("player"),
+                            market_id=market.get("id"),
+                            threshold=0.5,
+                            over=selection,
+                        ))
                     continue
                 prop_market = prop_markets.get(str(market.get("id")))
                 if not prop_market:
@@ -304,37 +419,16 @@ def fetch_bovada(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict
 
                 for threshold, sides in by_threshold.items():
                     over, under = sides.get("over", {}), sides.get("under", {})
-                    reference = over or under
-                    rows.append(
-                        {
-                            "record_type": "quote",
-                            "schema_version": SCHEMA_VERSION,
-                            "poll_id": poll_id,
-                            "sportsbook": "bovada",
-                            "fetched_at": fetched_at,
-                            "source_update_at": iso_from_epoch_ms(event.get("lastModified")),
-                            "game": event.get("description"),
-                            "event_id": str(event.get("id")),
-                            "scheduled_start": iso_from_epoch_ms(event.get("startTime")),
-                            "event_status": event.get("status"),
-                            "is_live": bool(event.get("live")),
-                            "away_team": away.get("name"),
-                            "away_team_id": str(away.get("id")) if away.get("id") else None,
-                            "home_team": home.get("name"),
-                            "home_team_id": str(home.get("id")) if home.get("id") else None,
-                            "player": prop_market["player"],
-                            "player_id": reference.get("player_id"),
-                            "player_team": prop_market["player_team"],
-                            "market_type": prop_market["prop_type"],
-                            "prop_type": prop_market["prop_type"],
-                            "market_id": str(market.get("id")),
-                            "threshold": threshold,
-                            "over_odds": over.get("american_odds"),
-                            "under_odds": under.get("american_odds"),
-                            "over_selection_id": over.get("selection_id"),
-                            "under_selection_id": under.get("selection_id"),
-                        }
-                    )
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type=prop_market["prop_type"],
+                        player=prop_market["player"],
+                        market_id=market.get("id"),
+                        threshold=threshold,
+                        over={**over, "player_team": prop_market["player_team"]},
+                        under={**under, "player_team": prop_market["player_team"]},
+                        is_alternate=prop_market["is_alternate"],
+                    ))
     return rows, []
 
 
@@ -347,6 +441,22 @@ def fanduel_prop_market(market: dict) -> tuple[str, str, bool] | None:
     if not prop:
         return None
     return player, prop[0], prop[1]
+
+
+def fanduel_runner_line(runner: dict) -> float | None:
+    line = parse_float(runner.get("handicap"))
+    match = re.search(
+        r"\(([+-]?\d+(?:\.\d+)?)\)\s*$", runner.get("runnerName", "")
+    )
+    return float(match.group(1)) if match else line
+
+
+def fanduel_runner_subject(runner: dict) -> str:
+    return re.sub(
+        r"\s*\([+-]?\d+(?:\.\d+)?\)\s*$",
+        "",
+        runner.get("runnerName", ""),
+    ).strip()
 
 
 def fetch_fanduel(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dict], list[str]]:
@@ -380,10 +490,137 @@ def fetch_fanduel(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[dic
             continue
 
         away, home = event["name"].split(" @ ", 1)
+        base_record = {
+            "record_type": "quote",
+            "schema_version": SCHEMA_VERSION,
+            "poll_id": poll_id,
+            "sportsbook": "fanduel",
+            "fetched_at": fetched_at,
+            "source_update_at": None,
+            "game": event.get("name"),
+            "event_id": str(event_id),
+            "scheduled_start": event.get("openDate"),
+            "event_status": "live" if event.get("inPlay") else "scheduled",
+            "is_live": bool(event.get("inPlay")),
+            "away_team": away,
+            "home_team": home,
+        }
         markets = detail.get("attachments", {}).get("markets", {}).values()
         for market in markets:
+            if market.get("marketStatus") != "OPEN":
+                continue
+            name = market.get("marketName", "")
+            active = [
+                runner for runner in market.get("runners", [])
+                if runner.get("runnerStatus") == "ACTIVE"
+            ]
+
+            def selection(runner: dict) -> dict:
+                american = parse_american(
+                    runner.get("winRunnerOdds", {}).get("americanDisplayOdds", {}).get("americanOdds")
+                )
+                return {
+                    "selection_id": str(runner.get("selectionId")),
+                    "american_odds": american,
+                    "decimal_odds": decimal_from_american(american),
+                }
+
+            if name == "Moneyline" and len(active) == 2:
+                for selected, opposite in ((active[0], active[1]), (active[1], active[0])):
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type="moneyline",
+                        player=selected.get("runnerName", ""),
+                        market_id=market.get("marketId"),
+                        threshold=0.0,
+                        over=selection(selected),
+                        under=selection(opposite),
+                    ))
+                continue
+            if name in {"Spread", "Alternate Spread"}:
+                for selected in active:
+                    line = fanduel_runner_line(selected)
+                    opposite = next(
+                        (
+                            runner for runner in active
+                            if runner is not selected
+                            and fanduel_runner_line(runner) == -line
+                            and fanduel_runner_subject(runner) != fanduel_runner_subject(selected)
+                        ),
+                        None,
+                    ) if line is not None else None
+                    if opposite:
+                        rows.append(quote_row(
+                            base_record,
+                            prop_type="spread",
+                            player=fanduel_runner_subject(selected),
+                            market_id=market.get("marketId"),
+                            threshold=-line,
+                            over=selection(selected),
+                            under=selection(opposite),
+                            is_alternate=name.startswith("Alternate"),
+                        ))
+                continue
+            if name in {"Total Points", "Alternate Total Points"}:
+                grouped = {}
+                for runner in active:
+                    line = fanduel_runner_line(runner)
+                    side = str(runner.get("result", {}).get("type", "")).lower()
+                    if line is not None and side in {"over", "under"}:
+                        grouped.setdefault(line, {})[side] = runner
+                for line, sides in grouped.items():
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type="game_total",
+                        player="Full Game",
+                        market_id=market.get("marketId"),
+                        threshold=line,
+                        over=selection(sides["over"]) if "over" in sides else None,
+                        under=selection(sides["under"]) if "under" in sides else None,
+                        is_alternate=name.startswith("Alternate"),
+                    ))
+                continue
+            team_total = re.match(r"(.+?) (?:Total Points|Alternate Total)$", name)
+            if team_total:
+                subject = next(
+                    (team for team in (away, home) if game_matches(team_total.group(1), team)),
+                    team_total.group(1),
+                )
+                grouped = {}
+                for runner in active:
+                    line = fanduel_runner_line(runner)
+                    side = str(runner.get("result", {}).get("type", "")).lower()
+                    if line is not None and side in {"over", "under"}:
+                        grouped.setdefault(line, {})[side] = runner
+                for line, sides in grouped.items():
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type="team_total",
+                        player=subject,
+                        market_id=market.get("marketId"),
+                        threshold=line,
+                        over=selection(sides["over"]) if "over" in sides else None,
+                        under=selection(sides["under"]) if "under" in sides else None,
+                        is_alternate="Alternate" in name,
+                    ))
+                continue
+            if name in {"Any Time Touchdown Scorer", "First Touchdown Scorer"}:
+                scorer_type = "anytime_touchdown" if name.startswith("Any Time") else "first_touchdown"
+                selections = [{**selection(runner), "player": runner.get("runnerName", "")} for runner in active]
+                fair = multiway_fair_probabilities(selections) if scorer_type == "first_touchdown" else {}
+                for scorer in selections:
+                    scorer["fair_probability"] = fair.get(scorer["selection_id"])
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type=scorer_type,
+                        player=scorer.pop("player"),
+                        market_id=market.get("marketId"),
+                        threshold=0.5,
+                        over=scorer,
+                    ))
+                continue
             parsed = fanduel_prop_market(market)
-            if not parsed or market.get("marketStatus") != "OPEN":
+            if not parsed:
                 continue
             player, prop_type, is_alternate = parsed
             by_threshold: dict[float, dict[str, dict]] = {}
@@ -479,10 +716,138 @@ def fetch_betrivers(game: str, poll_id: str, sport: str = "nfl") -> tuple[list[d
             errors.append(f"event {event_id}: {type(exc).__name__}: {exc}")
             continue
 
+        wanted_away, wanted_home = game.split(" @ ", 1)
+        base_record = {
+            "record_type": "quote",
+            "schema_version": SCHEMA_VERSION,
+            "poll_id": poll_id,
+            "sportsbook": "betrivers",
+            "fetched_at": fetched_at,
+            "source_update_at": None,
+            "game": event.get("name"),
+            "event_id": str(event_id),
+            "scheduled_start": event.get("start"),
+            "event_status": event.get("state"),
+            "is_live": event.get("state") != "NOT_STARTED",
+            "away_team": event.get("awayName"),
+            "home_team": event.get("homeName"),
+        }
+
+        def full_team(value: str) -> str:
+            return next(
+                (team for team in (wanted_away, wanted_home) if game_matches(value, team)),
+                value,
+            )
+
+        def selection(outcome: dict) -> dict:
+            american = parse_american(outcome.get("oddsAmerican"))
+            return {
+                "selection_id": str(outcome.get("id")),
+                "american_odds": american,
+                "decimal_odds": decimal_from_american(american),
+            }
+
         for offer in offers:
-            if offer.get("betOfferType", {}).get("name") != "Player Occurrence Line":
+            offer_type = offer.get("betOfferType", {}).get("name")
+            criterion = offer.get("criterion", {}).get("label", "")
+            active = [
+                outcome for outcome in offer.get("outcomes", [])
+                if outcome.get("status") == "OPEN"
+            ]
+            if offer_type == "Match" and criterion == "Moneyline" and len(active) == 2:
+                for selected, opposite in ((active[0], active[1]), (active[1], active[0])):
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type="moneyline",
+                        player=full_team(selected.get("participant", "")),
+                        market_id=offer.get("id"),
+                        threshold=0.0,
+                        over=selection(selected),
+                        under=selection(opposite),
+                    ))
                 continue
-            parsed = betrivers_prop(offer.get("criterion", {}).get("label", ""))
+            if offer_type == "Handicap" and criterion == "Point Spread":
+                for selected in active:
+                    raw_line = parse_float(selected.get("line"))
+                    line = raw_line / 1000 if raw_line is not None else None
+                    opposite = next(
+                        (
+                            outcome for outcome in active
+                            if outcome is not selected
+                            and parse_float(outcome.get("line")) == -raw_line
+                        ),
+                        None,
+                    ) if raw_line is not None else None
+                    if line is not None and opposite:
+                        rows.append(quote_row(
+                            base_record,
+                            prop_type="spread",
+                            player=full_team(selected.get("participant", "")),
+                            market_id=offer.get("id"),
+                            threshold=-line,
+                            over=selection(selected),
+                            under=selection(opposite),
+                            is_alternate="MAIN_LINE" not in offer.get("tags", []),
+                        ))
+                continue
+            if offer_type == "Over/Under" and (
+                criterion == "Total Points" or criterion.startswith("Total Points by ")
+            ):
+                sides = {
+                    str(outcome.get("type", "")).removeprefix("OT_").lower(): outcome
+                    for outcome in active
+                }
+                reference = sides.get("over") or sides.get("under")
+                raw_line = parse_float((reference or {}).get("line"))
+                if raw_line is not None:
+                    prop_type = "game_total" if criterion == "Total Points" else "team_total"
+                    subject = "Full Game" if prop_type == "game_total" else full_team(
+                        criterion.removeprefix("Total Points by ")
+                    )
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type=prop_type,
+                        player=subject,
+                        market_id=offer.get("id"),
+                        threshold=raw_line / 1000,
+                        over=selection(sides["over"]) if "over" in sides else None,
+                        under=selection(sides["under"]) if "under" in sides else None,
+                        is_alternate="MAIN_LINE" not in offer.get("tags", []),
+                    ))
+                continue
+            if offer_type == "Player Occurrence Line" and criterion == "Touchdown Scorer":
+                for outcome in active:
+                    if outcome.get("participant"):
+                        rows.append(quote_row(
+                            base_record,
+                            prop_type="anytime_touchdown",
+                            player=outcome["participant"],
+                            market_id=offer.get("id"),
+                            threshold=0.5,
+                            over=selection(outcome),
+                        ))
+                continue
+            if offer_type == "Player Occurrence Number" and criterion.startswith("First Touchdown Scorer"):
+                selections = [
+                    {**selection(outcome), "player": outcome.get("participant") or outcome.get("label", "")}
+                    for outcome in active
+                    if outcome.get("type") in {"OT_PLAYER_PARTICIPANT", "OT_NO_GOAL"}
+                ]
+                fair = multiway_fair_probabilities(selections)
+                for scorer in selections:
+                    scorer["fair_probability"] = fair.get(scorer["selection_id"])
+                    rows.append(quote_row(
+                        base_record,
+                        prop_type="first_touchdown",
+                        player=scorer.pop("player"),
+                        market_id=offer.get("id"),
+                        threshold=0.5,
+                        over=scorer,
+                    ))
+                continue
+            if offer_type != "Player Occurrence Line":
+                continue
+            parsed = betrivers_prop(criterion)
             if not parsed:
                 continue
             prop_type, is_alternate, alternate_threshold = parsed
@@ -546,6 +911,7 @@ def selection_records(
 ) -> list[dict]:
     """Expand paired quote rows into the shared per-selection record contract."""
     records = []
+    seen = set()
     for row in rows:
         if not row.get("prop_type") or not row.get("player"):
             continue
@@ -554,6 +920,18 @@ def selection_records(
             odds = row.get(f"{side}_odds")
             if not selection_id or odds is None:
                 continue
+            identity = (
+                row["sportsbook"],
+                row["event_id"],
+                row["market_id"],
+                row["player"],
+                row["threshold"],
+                side,
+                selection_id,
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
             record = selection_state_record(
                 sportsbook=row["sportsbook"],
                 session_id=session_id,
@@ -589,6 +967,7 @@ def selection_records(
                     "selection_id": selection_id,
                     "american_odds": odds,
                     "decimal_odds": decimal_from_american(odds),
+                    "fair_probability": row.get(f"{side}_fair_probability"),
                     "state": "open",
                 },
                 changed=["american_odds", "decimal_odds", "line", "state"],
@@ -656,6 +1035,9 @@ def records_to_persist(
             record["event_id"],
             record["market_id"],
             record["selection_id"],
+            record.get("player"),
+            record.get("side"),
+            record.get("line") if record.get("is_alternate") else None,
         )
         signature = tuple(record.get(field) for field in PERSISTED_SELECTION_FIELDS)
         prior = previous.get(key)
