@@ -53,6 +53,7 @@ class MarketState:
         self.last_status: dict[str, str] = {}
         self.last_lifecycle: dict[str, tuple] = {}
         self.ticker_stats: dict[str, dict] = {}
+        self.seen_trade_ids: set[str] = set()
 
     def add_tickers(self, tickers: list[str]) -> None:
         for ticker in tickers:
@@ -97,6 +98,9 @@ class MarketState:
         top = self._top_values(ticker)
         signature = tuple(top.values())
         previous = self.last_top.get(ticker)
+        if previous is None and not any(value is not None for value in signature):
+            self.last_top[ticker] = signature
+            return None
         names = tuple(top)
         prices = {
             "yes_bid_dollars", "yes_ask_dollars", "no_bid_dollars",
@@ -173,6 +177,11 @@ class MarketState:
             return []
 
         if message_type == "trade" and ticker in self.tickers:
+            trade_id = msg.get("trade_id")
+            if trade_id and trade_id in self.seen_trade_ids:
+                return []
+            if trade_id:
+                self.seen_trade_ids.add(trade_id)
             count = (
                 msg.get("count_fp")
                 if msg.get("count_fp") is not None
@@ -181,7 +190,7 @@ class MarketState:
             return [{
                 "record_type": "trade",
                 **common,
-                "trade_id": msg.get("trade_id"),
+                "trade_id": trade_id,
                 "yes_price_dollars": dollar_value(
                     msg, "yes_price_dollars", "yes_price"
                 ),
@@ -277,6 +286,9 @@ def load_local_env(path: Path = Path(".env")) -> None:
         "KALSHI_GAME",
         "KALSHI_GAMES", "KALSHI_GAME_DATE", "KALSHI_OUTPUT_DIR",
         "KALSHI_CHANNELS", "KALSHI_HEARTBEAT_SECONDS", "KALSHI_TOP_SIZE_CHANGE",
+        "KALSHI_MARKET_BATCH_SECONDS", "KALSHI_GZIP_MEMBER_BYTES",
+        "KALSHI_GZIP_MEMBER_SECONDS", "KALSHI_VOLUME_CAPACITY_BYTES",
+        "KALSHI_ARCHIVE_RETENTION_BYTES", "KALSHI_TARGET_STORAGE_BYTES",
         "SLATE_MANIFEST_JSON", "COLLECTOR_OUTPUT_ROOT",
     )
     for key in keys:

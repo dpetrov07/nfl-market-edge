@@ -1,4 +1,7 @@
 import argparse
+import gzip
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -6,10 +9,13 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from nfl_market_edge.kalshi import load_private_key
+from nfl_market_edge.kalshi import MarketState, load_private_key
 from nfl_market_edge.sportsbook import validate_selection_state
 from scripts.collect_combo_slate import commands
 from scripts.collect_live_combo_slate import (
+    Writer,
+    communication_identity,
+    communication_record,
     fill_record,
     is_slate_combo,
     subscribe_market_data,
@@ -163,6 +169,76 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(record["exchange_timestamp"], "2026-09-16T12:00:00Z")
         self.assertIsNotNone(record["received_at"])
         self.assertEqual(record["yes_price_dollars"], 0.07)
+
+    def test_rfq_record_has_lag_and_stable_dedupe_identity(self):
+        raw = {
+            "type": "rfq_created",
+            "msg": {
+                "id": "rfq-1",
+                "created_ts": "2026-09-20T12:00:00Z",
+                "market_ticker": "combo-1",
+            },
+        }
+
+        record = communication_record(raw, "2026-09-20T12:00:00.125000+00:00")
+
+        self.assertEqual(record["persistence_lag_ms"], 125.0)
+        self.assertNotIn("contracts", record)
+        self.assertNotIn("payload", record)
+        self.assertEqual(
+            communication_identity(raw),
+            ("rfq_created", "rfq-1", "2026-09-20T12:00:00Z"),
+        )
+
+    def test_writer_flushes_and_reports_storage_growth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl.gz"
+            writer = Writer(
+                path,
+                gzip_member_bytes=1,
+                gzip_member_seconds=3600,
+                volume_capacity_bytes=1_000_000,
+                archive_retention_bytes=500_000,
+                target_storage_bytes=750_000,
+            )
+            writer.write({"record_type": "communication"}, flush=True)
+            metrics = writer.storage_metrics()
+            writer.close()
+
+            rows = []
+            for part in sorted(Path(directory).glob("events*.jsonl.gz")):
+                with gzip.open(part, "rt") as handle:
+                    rows.extend(json.loads(line) for line in handle)
+
+        self.assertEqual(rows, [{"record_type": "communication"}])
+        self.assertGreater(metrics["output_bytes"], 0)
+        self.assertGreaterEqual(metrics["gzip_members_opened"], 2)
+        self.assertTrue(metrics["retention_protected"])
+
+    def test_market_state_dedupes_snapshots_and_trade_ids(self):
+        state = MarketState(["ticker"])
+        snapshot = {
+            "type": "orderbook_snapshot",
+            "msg": {"market_ticker": "ticker", "yes": [[10, 1]], "no": [[80, 1]]},
+        }
+        trade = {
+            "type": "trade",
+            "msg": {"market_ticker": "ticker", "trade_id": "trade-1", "count": 1},
+        }
+
+        self.assertEqual(len(state.process(snapshot, "now")), 1)
+        self.assertEqual(state.process(snapshot, "later"), [])
+        self.assertEqual(len(state.process(trade, "now")), 1)
+        self.assertEqual(state.process(trade, "later"), [])
+
+    def test_empty_book_snapshot_is_not_persisted(self):
+        state = MarketState(["ticker"])
+        empty = {
+            "type": "orderbook_snapshot",
+            "msg": {"market_ticker": "ticker", "yes": [], "no": []},
+        }
+
+        self.assertEqual(state.process(empty, "now"), [])
 
 
 class SubscriptionTest(unittest.IsolatedAsyncioTestCase):

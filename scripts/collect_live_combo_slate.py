@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import suppress
 import gzip
 import json
 import os
@@ -31,7 +32,7 @@ from nfl_market_edge.health import emit_health, health_record
 
 BOOK_CHANNELS = ("orderbook_delta",)
 COMBO_CHANNELS = ("trade", "ticker")
-GLOBAL_CHANNELS = ("communications", "market_lifecycle_v2", "multivariate_market_lifecycle")
+GLOBAL_CHANNELS = ("market_lifecycle_v2", "multivariate_market_lifecycle")
 COMMUNICATION_TYPES = {
     "rfq_created",
     "rfq_deleted",
@@ -40,6 +41,20 @@ COMMUNICATION_TYPES = {
     "quote_executed",
 }
 STOP = False
+
+
+def directory_size(path: Path) -> int:
+    total = 0
+    try:
+        for root, _, files in os.walk(path):
+            for name in files:
+                try:
+                    total += (Path(root) / name).stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
 
 
 def compact_market(market: dict) -> dict:
@@ -115,19 +130,168 @@ def is_slate_combo(
 
 
 class Writer:
-    def __init__(self, path: Path):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        gzip_member_bytes: int = 128 * 1024 * 1024,
+        gzip_member_seconds: float = 3600,
+        volume_capacity_bytes: int = 5_000_000_000,
+        archive_retention_bytes: int = 2_600_000_000,
+        target_storage_bytes: int = 2_750_000_000,
+    ):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.health_path = path.parent / "health.json"
-        self.handle = gzip.open(path, "at", encoding="utf-8", compresslevel=6)
+        self.gzip_member_bytes = gzip_member_bytes
+        self.gzip_member_seconds = gzip_member_seconds
+        self.volume_capacity_bytes = volume_capacity_bytes
+        self.archive_retention_bytes = archive_retention_bytes
+        self.target_storage_bytes = target_storage_bytes
+        self.storage_root = Path(
+            os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or path.parent
+        )
+        self.archives_created = 0
+        self.archives_pruned = 0
+        self.archive_bytes_pruned = 0
+        if path.exists() and path.stat().st_size:
+            path.replace(self._archive_path())
+            self.archives_created += 1
+        self._prune_archives()
+        self.started = time.monotonic()
+        self.initial_collector_bytes = self._collector_bytes()
+        self.initial_volume_bytes = directory_size(self.storage_root)
+        self.member_started = self.started
+        self.gzip_members_opened = 1
+        self.records_written = 0
+        self.handle = gzip.open(path, "wt", encoding="utf-8", compresslevel=6)
 
-    def write(self, record: dict) -> None:
+    def _archive_path(self) -> Path:
+        stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}"
+        base = self.path.name.removesuffix(".jsonl.gz")
+        return self.path.with_name(f"{base}.{stamp}.jsonl.gz")
+
+    def _archives(self) -> list[Path]:
+        base = self.path.name.removesuffix(".jsonl.gz")
+        return sorted(self.path.parent.glob(f"{base}.*.jsonl.gz"))
+
+    def _collector_bytes(self) -> int:
+        paths = self._archives()
+        if self.path.exists():
+            paths.append(self.path)
+        return sum(path.stat().st_size for path in paths if path.exists())
+
+    def _prune_archives(self) -> None:
+        archives = self._archives()
+        total = sum(path.stat().st_size for path in archives)
+        for path in archives:
+            if total <= self.archive_retention_bytes:
+                break
+            size = path.stat().st_size
+            path.unlink()
+            total -= size
+            self.archives_pruned += 1
+            self.archive_bytes_pruned += size
+
+    def write(self, record: dict, *, flush: bool = False) -> None:
         self.handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
+        self.records_written += 1
+        if flush:
+            self.handle.flush()
+            self._rotate_member_if_needed()
+
+    def _rotate_member_if_needed(self) -> None:
+        size = self.path.stat().st_size if self.path.exists() else 0
+        member_age = time.monotonic() - self.member_started
+        if (
+            size < self.gzip_member_bytes
+            and member_age < self.gzip_member_seconds
+        ):
+            return
+        self.handle.close()
+        if self.path.exists() and self.path.stat().st_size:
+            self.path.replace(self._archive_path())
+            self.archives_created += 1
+            self._prune_archives()
+        self.member_started = time.monotonic()
+        self.gzip_members_opened += 1
+        self.handle = gzip.open(
+            self.path, "wt", encoding="utf-8", compresslevel=6
+        )
+
+    def storage_metrics(self) -> dict:
+        self.handle.flush()
+        output_bytes = self.path.stat().st_size if self.path.exists() else 0
+        collector_bytes = self._collector_bytes()
+        volume_bytes = directory_size(self.storage_root)
+        elapsed_hours = max((time.monotonic() - self.started) / 3600, 1 / 3600)
+        bytes_written = max(
+            collector_bytes - self.initial_collector_bytes + self.archive_bytes_pruned,
+            0,
+        )
+        bytes_per_hour = bytes_written / elapsed_hours
+        remaining = max(self.volume_capacity_bytes - volume_bytes, 0)
+        hours_to_capacity = remaining / bytes_per_hour if bytes_per_hour else None
+        utilization = (
+            volume_bytes / self.volume_capacity_bytes
+            if self.volume_capacity_bytes
+            else None
+        )
+        non_collector_bytes = max(volume_bytes - collector_bytes, 0)
+        estimated_max_volume_bytes = (
+            non_collector_bytes
+            + self.archive_retention_bytes
+            + self.gzip_member_bytes
+        )
+        retention_protected = (
+            estimated_max_volume_bytes <= self.volume_capacity_bytes
+        )
+        projected_24h_collector_bytes = round(
+            collector_bytes + bytes_per_hour * 24
+        )
+        projection_warning = (
+            projected_24h_collector_bytes > self.target_storage_bytes
+        )
+        return {
+            "output_bytes": output_bytes,
+            "collector_bytes": collector_bytes,
+            "bytes_written": bytes_written,
+            "records_written": self.records_written,
+            "bytes_per_hour": round(bytes_per_hour, 1),
+            "estimated_24h_growth_bytes": round(bytes_per_hour * 24),
+            "projected_24h_collector_bytes": projected_24h_collector_bytes,
+            "volume_bytes_used": volume_bytes,
+            "volume_capacity_bytes": self.volume_capacity_bytes,
+            "volume_utilization": round(utilization, 4)
+            if utilization is not None
+            else None,
+            "estimated_hours_to_capacity": round(hours_to_capacity, 1)
+            if hours_to_capacity is not None
+            else None,
+            "storage_warning": bool(
+                utilization is not None
+                and (
+                    utilization >= 0.8
+                    or not retention_protected
+                    or projection_warning
+                )
+            ),
+            "target_storage_bytes": self.target_storage_bytes,
+            "projection_warning": projection_warning,
+            "archive_retention_bytes": self.archive_retention_bytes,
+            "estimated_max_volume_bytes": estimated_max_volume_bytes,
+            "retention_protected": retention_protected,
+            "gzip_members_opened": self.gzip_members_opened,
+            "archives_created": self.archives_created,
+            "archives_pruned": self.archives_pruned,
+            "archive_bytes_pruned": self.archive_bytes_pruned,
+        }
 
     def status(self, status: str, **details) -> None:
-        record = health_record("kalshi", status, **details)
-        self.write(record)
-        self.handle.flush()
+        record = health_record(
+            "kalshi", status, **self.storage_metrics(), **details
+        )
+        self.write(record, flush=True)
         emit_health(record, self.health_path)
 
     def close(self) -> None:
@@ -168,7 +332,7 @@ class SlateRegistry:
             }
             for leg in selected_legs(row)
         ]
-        before = self.tickers
+        is_new_combo = ticker not in self.combos
         existing = self.combos.get(ticker, {})
         combo = {
             **existing,
@@ -181,7 +345,12 @@ class SlateRegistry:
             "mve_selected_legs": legs,
         }
         self.combos[ticker] = combo
-        self.components.update(leg["market_ticker"] for leg in legs)
+        new_tickers = [ticker] if is_new_combo else []
+        for leg in legs:
+            component = leg["market_ticker"]
+            if component not in self.components:
+                self.components.add(component)
+                new_tickers.append(component)
         if combo != existing:
             self.writer.write(
                 {
@@ -192,7 +361,7 @@ class SlateRegistry:
                     "combo": combo,
                 }
             )
-        return sorted(self.tickers - before)
+        return sorted(new_tickers)
 
     def add_component_metadata(self, markets: list[dict]) -> None:
         fresh = [compact_market(row) for row in markets if row.get("ticker") not in self.component_metadata]
@@ -366,14 +535,42 @@ async def fetch_new_market(client: KalshiClient, ticker: str) -> dict:
 
 def communication_record(raw: dict, received_at: str) -> dict:
     msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
-    return {
+    payload = msg
+    if str(raw.get("type", "")).startswith("rfq_"):
+        payload = {
+            key: msg[key]
+            for key in (
+                "mve_collection_ticker",
+                "mve_selected_legs",
+            )
+            if msg.get(key) is not None
+        }
+    exchange_timestamp = (
+        msg.get("created_ts")
+        or msg.get("updated_ts")
+        or msg.get("executed_ts")
+        or msg.get("deleted_ts")
+    )
+    persistence_lag_ms = None
+    try:
+        exchange_time = datetime.fromisoformat(
+            str(exchange_timestamp).replace("Z", "+00:00")
+        )
+        receive_time = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+        persistence_lag_ms = round(
+            (receive_time - exchange_time).total_seconds() * 1000, 3
+        )
+    except (TypeError, ValueError):
+        pass
+    record = {
         "record_type": "communication",
         "received_at": received_at,
         "communication_type": raw.get("type"),
         "market_ticker": msg.get("market_ticker"),
         "rfq_id": msg.get("rfq_id") or (msg.get("id") if raw.get("type", "").startswith("rfq_") else None),
         "quote_id": msg.get("quote_id") or (msg.get("id") if raw.get("type", "").startswith("quote_") else None),
-        "exchange_timestamp": msg.get("created_ts") or msg.get("updated_ts") or msg.get("executed_ts") or msg.get("deleted_ts"),
+        "exchange_timestamp": exchange_timestamp,
+        "persistence_lag_ms": persistence_lag_ms,
         "contracts": msg.get("contracts_fp") or msg.get("contracts_accepted_fp"),
         "yes_contracts": msg.get("yes_contracts_offered_fp") or msg.get("yes_contracts_fp"),
         "no_contracts": msg.get("no_contracts_offered_fp") or msg.get("no_contracts_fp"),
@@ -385,8 +582,32 @@ def communication_record(raw: dict, received_at: str) -> dict:
         "status": msg.get("status"),
         "sid": raw.get("sid"),
         "seq": raw.get("seq"),
-        "payload": msg,
+        "payload": payload,
     }
+    return {
+        key: value
+        for key, value in record.items()
+        if value is not None and value != {}
+    }
+
+
+def communication_identity(raw: dict) -> tuple | None:
+    msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
+    message_type = raw.get("type")
+    object_id = (
+        msg.get("rfq_id")
+        or msg.get("quote_id")
+        or msg.get("id")
+    )
+    timestamp = (
+        msg.get("created_ts")
+        or msg.get("updated_ts")
+        or msg.get("executed_ts")
+        or msg.get("deleted_ts")
+    )
+    if not message_type or not object_id:
+        return None
+    return message_type, str(object_id), str(timestamp)
 
 
 async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> None:
@@ -403,6 +624,12 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
     fills_received = 0
     fill_api_available = True
     settled_combos: set[str] = set()
+    seen_communications: set[tuple] = set()
+    duplicate_communications_skipped = 0
+    rfqs_persisted = 0
+    last_rfq_at = None
+    last_rfq_exchange_at = None
+    last_rfq_persistence_lag_ms = None
 
     async def poll_fills() -> None:
         nonlocal fill_since, fills_received, fill_api_available
@@ -541,6 +768,118 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
         return
 
     started = time.monotonic()
+    state = MarketState(sorted(registry.tickers), args.top_size_change)
+    market_queue: asyncio.Queue[list[str]] = asyncio.Queue()
+    communication_messages_received = 0
+
+    async def collect_communications() -> None:
+        nonlocal duplicate_communications_skipped
+        nonlocal communication_messages_received
+        nonlocal rfqs_persisted
+        nonlocal last_rfq_at, last_rfq_exchange_at
+        nonlocal last_rfq_persistence_lag_ms
+        attempt, backoff = 0, 1
+        while not STOP and (
+            not args.duration or time.monotonic() - started < args.duration
+        ):
+            attempt += 1
+            connection_id = (
+                f"communications-{datetime.now(timezone.utc):%Y%m%dT%H%M%S.%fZ}"
+                f"-{attempt}"
+            )
+            try:
+                writer.status(
+                    "communications_connecting", connection_id=connection_id
+                )
+                async with websockets.connect(
+                    WS_URL,
+                    additional_headers=auth_headers(key_id, private_key),
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=10,
+                    max_queue=10000,
+                ) as ws:
+                    await subscribe(ws, 1, "communications")
+                    writer.status(
+                        "communications_connected", connection_id=connection_id
+                    )
+                    last_sequence = {}
+                    backoff = 1
+                    while not STOP and (
+                        not args.duration
+                        or time.monotonic() - started < args.duration
+                    ):
+                        raw = json.loads(await ws.recv())
+                        received_at = utc_now()
+                        communication_messages_received += 1
+                        msg = (
+                            raw.get("msg")
+                            if isinstance(raw.get("msg"), dict)
+                            else {}
+                        )
+                        sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
+                        if isinstance(sid, int) and isinstance(seq, int):
+                            previous = last_sequence.get(sid)
+                            if previous is not None and seq != previous + 1:
+                                raise RuntimeError(
+                                    f"communications sequence gap: expected "
+                                    f"{previous + 1}, received {seq}"
+                                )
+                            last_sequence[sid] = seq
+                        message_type = raw.get("type")
+                        if message_type not in COMMUNICATION_TYPES:
+                            for record in state.process(raw, received_at):
+                                record["connection_id"] = connection_id
+                                record["market_role"] = None
+                                writer.write(record)
+                            continue
+                        is_new_slate_rfq = (
+                            message_type == "rfq_created"
+                            and is_slate_combo(
+                                msg, registry.event_games, registry.combo_scope
+                            )
+                        )
+                        if not is_new_slate_rfq and registry.role(
+                            msg.get("market_ticker")
+                        ) != "combo":
+                            continue
+                        identity = communication_identity(raw)
+                        if identity and identity in seen_communications:
+                            duplicate_communications_skipped += 1
+                            continue
+                        if identity:
+                            seen_communications.add(identity)
+                        record = communication_record(raw, received_at)
+                        record["connection_id"] = connection_id
+                        writer.write(record, flush=is_new_slate_rfq)
+                        if not is_new_slate_rfq:
+                            continue
+                        rfqs_persisted += 1
+                        last_rfq_at = received_at
+                        last_rfq_exchange_at = record["exchange_timestamp"]
+                        last_rfq_persistence_lag_ms = record[
+                            "persistence_lag_ms"
+                        ]
+                        new_tickers = registry.add_combo(
+                            {**msg, "ticker": msg.get("market_ticker")},
+                            "communications",
+                        )
+                        if new_tickers:
+                            state.add_tickers(new_tickers)
+                            market_queue.put_nowait(new_tickers)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                writer.status(
+                    "communications_disconnected",
+                    connection_id=connection_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                    reconnect_in_seconds=backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+
+    communications_task = asyncio.create_task(collect_communications())
     attempt, backoff = 0, 1
     while not STOP and (not args.duration or time.monotonic() - started < args.duration):
         attempt += 1
@@ -563,101 +902,105 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                     command_id = await subscribe_market_data(
                         ws, command_id, registry, sorted(registry.tickers)
                     )
-                state = MarketState(sorted(registry.tickers), args.top_size_change)
+                state.add_tickers(sorted(registry.tickers))
+
+                async def process_new_markets() -> None:
+                    nonlocal command_id
+                    while True:
+                        batch = set(await market_queue.get())
+                        await asyncio.sleep(args.market_batch_seconds)
+                        while not market_queue.empty():
+                            batch.update(market_queue.get_nowait())
+                        command_id = await subscribe_market_data(
+                            ws, command_id, registry, sorted(batch)
+                        )
+                        components = batch & registry.components
+                        if components:
+                            metadata = await asyncio.to_thread(
+                                market_metadata, client, components
+                            )
+                            registry.add_component_metadata(metadata)
+
+                market_worker = asyncio.create_task(process_new_markets())
                 last_sequence, last_heartbeat = {}, 0.0
                 messages, last_message_at = 0, None
                 backoff = 1
-                while not STOP and (not args.duration or time.monotonic() - started < args.duration):
-                    now = time.monotonic()
-                    if now - last_heartbeat >= args.heartbeat_seconds:
-                        await poll_fills()
-                        writer.status(
-                            "heartbeat",
-                            connection_id=connection_id,
-                            messages_received=messages,
-                            combo_count=len(registry.combos),
-                            component_count=len(registry.components),
-                            books_initialized=len(state.initialized),
-                            settled_combo_count=len(settled_combos),
-                            fills_received=fills_received,
-                            fill_api_available=fill_api_available,
-                            last_message_at=last_message_at,
-                        )
-                        last_heartbeat = now
-                    try:
-                        raw = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
-                    except asyncio.TimeoutError:
-                        continue
-                    received_at = utc_now()
-                    last_message_at = received_at
-                    messages += 1
-                    msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
-                    sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
-                    if isinstance(sid, int) and isinstance(seq, int):
-                        previous = last_sequence.get(sid)
-                        if previous is not None and seq != previous + 1:
-                            writer.status("sequence_gap", sid=sid, expected_seq=previous + 1, received_seq=seq)
-                            raise RuntimeError("WebSocket sequence gap")
-                        last_sequence[sid] = seq
-
-                    message_type = raw.get("type")
-                    if message_type in COMMUNICATION_TYPES:
-                        if message_type == "rfq_created" and is_slate_combo(
-                            msg, registry.event_games, registry.combo_scope
-                        ):
-                            new_tickers = registry.add_combo(
-                                {**msg, "ticker": msg.get("market_ticker")}, "communications"
+                try:
+                    while not STOP and (not args.duration or time.monotonic() - started < args.duration):
+                        now = time.monotonic()
+                        if now - last_heartbeat >= args.heartbeat_seconds:
+                            await poll_fills()
+                            writer.status(
+                                "heartbeat",
+                                connection_id=connection_id,
+                                messages_received=messages,
+                                combo_count=len(registry.combos),
+                                component_count=len(registry.components),
+                                books_initialized=len(state.initialized),
+                                settled_combo_count=len(settled_combos),
+                                fills_received=fills_received,
+                                fill_api_available=fill_api_available,
+                                communication_messages_received=communication_messages_received,
+                                communications_connected=not communications_task.done(),
+                                rfqs_persisted=rfqs_persisted,
+                                duplicate_communications_skipped=duplicate_communications_skipped,
+                                pending_market_batches=market_queue.qsize(),
+                                last_rfq_at=last_rfq_at,
+                                last_rfq_exchange_at=last_rfq_exchange_at,
+                                last_rfq_persistence_lag_ms=last_rfq_persistence_lag_ms,
+                                last_message_at=last_message_at,
                             )
+                            last_heartbeat = now
+                        try:
+                            raw = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
+                        except asyncio.TimeoutError:
+                            continue
+                        received_at = utc_now()
+                        last_message_at = received_at
+                        messages += 1
+                        msg = raw.get("msg") if isinstance(raw.get("msg"), dict) else {}
+                        sid, seq = raw.get("sid") or msg.get("sid"), raw.get("seq")
+                        if isinstance(sid, int) and isinstance(seq, int):
+                            previous = last_sequence.get(sid)
+                            if previous is not None and seq != previous + 1:
+                                writer.status("sequence_gap", sid=sid, expected_seq=previous + 1, received_seq=seq)
+                                raise RuntimeError("WebSocket sequence gap")
+                            last_sequence[sid] = seq
+
+                        message_type = raw.get("type")
+                        ticker = msg.get("market_ticker") or msg.get("ticker")
+                        if (
+                            msg.get("event_type") == "created"
+                            and ticker
+                            and ticker not in registry.combos
+                            and str(ticker).startswith("KXMVE")
+                            and message_type in {
+                                "market_lifecycle_v2", "multivariate_market_lifecycle"
+                            }
+                        ):
+                            market = await fetch_new_market(client, ticker)
+                            new_tickers = registry.add_combo(market, "multivariate_lifecycle")
                             if new_tickers:
                                 state.add_tickers(new_tickers)
-                                command_id = await subscribe_market_data(
-                                    ws, command_id, registry, new_tickers
-                                )
-                                metadata = await asyncio.to_thread(
-                                    market_metadata, client, set(new_tickers) & registry.components
-                                )
-                                registry.add_component_metadata(metadata)
-                        if registry.role(msg.get("market_ticker")) == "combo":
-                            record = communication_record(raw, received_at)
+                                market_queue.put_nowait(new_tickers)
+                        for record in state.process(raw, received_at):
                             record["connection_id"] = connection_id
+                            record["market_role"] = registry.role(record.get("market_ticker"))
+                            if (
+                                record["market_role"] == "combo"
+                                and record["record_type"] == "market_status"
+                                and (
+                                    record.get("result") in {"yes", "no"}
+                                    or record.get("settlement_value_dollars") is not None
+                                    or record.get("status") == "settled"
+                                )
+                            ):
+                                settled_combos.add(record["market_ticker"])
                             writer.write(record)
-                        continue
-
-                    ticker = msg.get("market_ticker") or msg.get("ticker")
-                    if (
-                        msg.get("event_type") == "created"
-                        and ticker
-                        and ticker not in registry.combos
-                        and str(ticker).startswith("KXMVE")
-                        and message_type in {
-                            "market_lifecycle_v2", "multivariate_market_lifecycle"
-                        }
-                    ):
-                        market = await fetch_new_market(client, ticker)
-                        new_tickers = registry.add_combo(market, "multivariate_lifecycle")
-                        if new_tickers:
-                            state.add_tickers(new_tickers)
-                            command_id = await subscribe_market_data(
-                                ws, command_id, registry, new_tickers
-                            )
-                            metadata = await asyncio.to_thread(
-                                market_metadata, client, set(new_tickers) & registry.components
-                            )
-                            registry.add_component_metadata(metadata)
-                    for record in state.process(raw, received_at):
-                        record["connection_id"] = connection_id
-                        record["market_role"] = registry.role(record.get("market_ticker"))
-                        if (
-                            record["market_role"] == "combo"
-                            and record["record_type"] == "market_status"
-                            and (
-                                record.get("result") in {"yes", "no"}
-                                or record.get("settlement_value_dollars") is not None
-                                or record.get("status") == "settled"
-                            )
-                        ):
-                            settled_combos.add(record["market_ticker"])
-                        writer.write(record)
+                finally:
+                    market_worker.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await market_worker
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -669,6 +1012,9 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
             )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
+    communications_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await communications_task
     writer.status("stopped")
 
 
@@ -696,6 +1042,36 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=float(os.getenv("KALSHI_TOP_SIZE_CHANGE", "0")),
     )
+    parser.add_argument(
+        "--market-batch-seconds",
+        type=float,
+        default=float(os.getenv("KALSHI_MARKET_BATCH_SECONDS", "0.25")),
+    )
+    parser.add_argument(
+        "--gzip-member-bytes",
+        type=int,
+        default=int(os.getenv("KALSHI_GZIP_MEMBER_BYTES", str(128 * 1024 * 1024))),
+    )
+    parser.add_argument(
+        "--gzip-member-seconds",
+        type=float,
+        default=float(os.getenv("KALSHI_GZIP_MEMBER_SECONDS", "3600")),
+    )
+    parser.add_argument(
+        "--volume-capacity-bytes",
+        type=int,
+        default=int(os.getenv("KALSHI_VOLUME_CAPACITY_BYTES", "5000000000")),
+    )
+    parser.add_argument(
+        "--archive-retention-bytes",
+        type=int,
+        default=int(os.getenv("KALSHI_ARCHIVE_RETENTION_BYTES", "2600000000")),
+    )
+    parser.add_argument(
+        "--target-storage-bytes",
+        type=int,
+        default=int(os.getenv("KALSHI_TARGET_STORAGE_BYTES", "2750000000")),
+    )
     return parser.parse_args()
 
 
@@ -711,7 +1087,14 @@ def main() -> None:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
     path = args.output_dir / manifest["slate_id"] / "kalshi" / "events.jsonl.gz"
-    writer = Writer(path)
+    writer = Writer(
+        path,
+        gzip_member_bytes=args.gzip_member_bytes,
+        gzip_member_seconds=args.gzip_member_seconds,
+        volume_capacity_bytes=args.volume_capacity_bytes,
+        archive_retention_bytes=args.archive_retention_bytes,
+        target_storage_bytes=args.target_storage_bytes,
+    )
     print(f"capturing {manifest['slate_id']} -> {path}", flush=True)
     try:
         asyncio.run(collect(args, manifest, writer))

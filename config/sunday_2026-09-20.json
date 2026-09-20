@@ -1,0 +1,24 @@
+{
+  "slate_id": "nfl-2026-09-20",
+  "league": "nfl",
+  "date": "2026-09-20",
+  "combo_scope": "cross_game",
+  "initial_scan_pages": 5,
+  "events": [
+    {"ticker": "KXNFLGAME-26SEP20CARATL", "game": "Carolina Panthers @ Atlanta Falcons"},
+    {"ticker": "KXNFLGAME-26SEP20CINHOU", "game": "Cincinnati Bengals @ Houston Texans"},
+    {"ticker": "KXNFLGAME-26SEP20CLETB", "game": "Cleveland Browns @ Tampa Bay Buccaneers"},
+    {"ticker": "KXNFLGAME-26SEP20GBNYJ", "game": "Green Bay Packers @ New York Jets"},
+    {"ticker": "KXNFLGAME-26SEP20MINCHI", "game": "Minnesota Vikings @ Chicago Bears"},
+    {"ticker": "KXNFLGAME-26SEP20NOBAL", "game": "New Orleans Saints @ Baltimore Ravens"},
+    {"ticker": "KXNFLGAME-26SEP20PHITEN", "game": "Philadelphia Eagles @ Tennessee Titans"},
+    {"ticker": "KXNFLGAME-26SEP20PITNE", "game": "Pittsburgh Steelers @ New England Patriots"},
+    {"ticker": "KXNFLGAME-26SEP20JACDEN", "game": "Jacksonville Jaguars @ Denver Broncos"},
+    {"ticker": "KXNFLGAME-26SEP20LVLAC", "game": "Las Vegas Raiders @ Los Angeles Chargers"},
+    {"ticker": "KXNFLGAME-26SEP20MIASF", "game": "Miami Dolphins @ San Francisco 49ers"},
+    {"ticker": "KXNFLGAME-26SEP20SEAARI", "game": "Seattle Seahawks @ Arizona Cardinals"},
+    {"ticker": "KXNFLGAME-26SEP20WASDAL", "game": "Washington Commanders @ Dallas Cowboys"},
+    {"ticker": "KXNFLGAME-26SEP20INDKC", "game": "Indianapolis Colts @ Kansas City Chiefs"}
+  ],
+  "combo_tickers": []
+}
