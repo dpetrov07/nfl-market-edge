@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import OrderedDict, deque
 import os
 import re
 import sys
@@ -22,6 +23,36 @@ API_ROOT = "/trade-api/v2"
 REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
+
+
+class RecentSet:
+    """Set-like replay window with a fixed memory ceiling."""
+
+    def __init__(self, max_entries: int):
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self.max_entries = max_entries
+        self._values = set()
+        self._order = deque()
+
+    def __contains__(self, value) -> bool:
+        return value in self._values
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def add(self, value) -> bool:
+        if value in self._values:
+            return False
+        if len(self._order) >= self.max_entries:
+            self._values.remove(self._order.popleft())
+        self._order.append(value)
+        self._values.add(value)
+        return True
+
+    def update(self, values) -> None:
+        for value in values:
+            self.add(value)
 
 
 def utc_now() -> str:
@@ -44,22 +75,73 @@ def dollar_value(msg: dict, dollars_key: str, cents_key: str) -> float | None:
 class MarketState:
     """Maintain full books and emit compact top-of-book/lifecycle records."""
 
-    def __init__(self, tickers: list[str], top_size_change: float = 10.0):
-        self.tickers = set(tickers)
+    def __init__(
+        self,
+        tickers: list[str],
+        top_size_change: float = 10.0,
+        *,
+        max_tickers: int = 10_000,
+        dedupe_entries: int = 100_000,
+    ):
+        if max_tickers < 1:
+            raise ValueError("max_tickers must be positive")
+        self.max_tickers = max_tickers
+        self.tickers: set[str] = set()
+        self._ticker_order = OrderedDict()
+        self._evictable_tickers = OrderedDict()
+        self.pinned_tickers: set[str] = set()
         self.top_size_change = top_size_change
-        self.books = {ticker: {"yes": {}, "no": {}} for ticker in tickers}
+        self.books: dict[str, dict[str, dict]] = {}
         self.initialized: set[str] = set()
         self.last_top: dict[str, tuple] = {}
         self.last_status: dict[str, str] = {}
         self.last_lifecycle: dict[str, tuple] = {}
         self.ticker_stats: dict[str, dict] = {}
-        self.seen_trade_ids: set[str] = set()
+        self.seen_trade_ids = RecentSet(dedupe_entries)
+        self.tickers_evicted = 0
+        self.add_tickers(tickers)
 
-    def add_tickers(self, tickers: list[str]) -> None:
+    def _remove_ticker(self, ticker: str) -> None:
+        if ticker not in self.tickers:
+            return
+        self.tickers_evicted += 1
+        self.tickers.discard(ticker)
+        self._ticker_order.pop(ticker, None)
+        self._evictable_tickers.pop(ticker, None)
+        self.pinned_tickers.discard(ticker)
+        self.books.pop(ticker, None)
+        self.initialized.discard(ticker)
+        self.last_top.pop(ticker, None)
+        self.last_status.pop(ticker, None)
+        self.last_lifecycle.pop(ticker, None)
+        self.ticker_stats.pop(ticker, None)
+
+    def remove_tickers(self, tickers) -> None:
+        for ticker in tickers:
+            self._remove_ticker(ticker)
+
+    def add_tickers(self, tickers: list[str], *, pinned: bool = False) -> None:
         for ticker in tickers:
             if ticker not in self.tickers:
+                while len(self.tickers) >= self.max_tickers:
+                    candidates = self._evictable_tickers or self._ticker_order
+                    self._remove_ticker(next(iter(candidates)))
                 self.tickers.add(ticker)
                 self.books[ticker] = {"yes": {}, "no": {}}
+            self._ticker_order.pop(ticker, None)
+            self._ticker_order[ticker] = None
+            if pinned:
+                self.pinned_tickers.add(ticker)
+                self._evictable_tickers.pop(ticker, None)
+            elif ticker not in self.pinned_tickers:
+                self._evictable_tickers.pop(ticker, None)
+                self._evictable_tickers[ticker] = None
+
+    def _touch_ticker(self, ticker: str | None) -> None:
+        if ticker in self.tickers:
+            self._ticker_order.move_to_end(ticker)
+            if ticker in self._evictable_tickers:
+                self._evictable_tickers.move_to_end(ticker)
 
     @staticmethod
     def _levels(msg: dict, side: str) -> dict[float, float]:
@@ -146,6 +228,7 @@ class MarketState:
             "sid": raw.get("sid"),
             "seq": raw.get("seq"),
         }
+        self._touch_ticker(ticker)
 
         if message_type == "orderbook_snapshot" and ticker in self.tickers:
             self.books[ticker] = {
@@ -178,10 +261,8 @@ class MarketState:
 
         if message_type == "trade" and ticker in self.tickers:
             trade_id = msg.get("trade_id")
-            if trade_id and trade_id in self.seen_trade_ids:
+            if trade_id and not self.seen_trade_ids.add(trade_id):
                 return []
-            if trade_id:
-                self.seen_trade_ids.add(trade_id)
             count = (
                 msg.get("count_fp")
                 if msg.get("count_fp") is not None
@@ -289,6 +370,9 @@ def load_local_env(path: Path = Path(".env")) -> None:
         "KALSHI_MARKET_BATCH_SECONDS", "KALSHI_GZIP_MEMBER_BYTES",
         "KALSHI_GZIP_MEMBER_SECONDS", "KALSHI_VOLUME_CAPACITY_BYTES",
         "KALSHI_ARCHIVE_RETENTION_BYTES", "KALSHI_TARGET_STORAGE_BYTES",
+        "KALSHI_STATE_MAX_TICKERS", "KALSHI_DEDUPE_ENTRIES",
+        "KALSHI_MAX_ACTIVE_COMBOS", "KALSHI_COMBO_IDLE_SECONDS",
+        "KALSHI_MAX_PENDING_MARKET_BATCHES",
         "SLATE_MANIFEST_JSON", "COLLECTOR_OUTPUT_ROOT",
     )
     for key in keys:

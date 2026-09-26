@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import OrderedDict
 from contextlib import suppress
 import gzip
 import json
@@ -19,6 +20,7 @@ from nfl_market_edge.kalshi import (
     API_ROOT,
     KalshiClient,
     MarketState,
+    RecentSet,
     WS_URL,
     auth_headers,
     dollar_value,
@@ -299,18 +301,35 @@ class Writer:
 
 
 class SlateRegistry:
-    def __init__(self, manifest: dict, writer: Writer):
+    def __init__(
+        self,
+        manifest: dict,
+        writer: Writer,
+        *,
+        max_combos: int = 10_000,
+        max_components: int = 10_000,
+        combo_idle_seconds: float = 3600,
+    ):
+        if max_combos < 1 or max_components < 1:
+            raise ValueError("registry limits must be positive")
+        if combo_idle_seconds <= 0:
+            raise ValueError("combo_idle_seconds must be positive")
         self.manifest = manifest
         self.writer = writer
         self.event_games = manifest["event_games"]
         self.combo_scope = manifest.get("combo_scope", "cross_game")
-        self.combos: dict[str, dict] = {}
-        self.components: set[str] = set()
-        self.component_metadata: set[str] = set()
+        self.max_combos = max_combos
+        self.max_components = max_components
+        self.combo_idle_seconds = combo_idle_seconds
+        self.combos: OrderedDict[str, dict] = OrderedDict()
+        self.combo_last_seen: dict[str, float] = {}
+        self.components: OrderedDict[str, None] = OrderedDict()
+        self.component_metadata = RecentSet(max_components)
+        self.evicted_tickers: list[str] = []
 
     @property
     def tickers(self) -> set[str]:
-        return set(self.combos) | self.components
+        return set(self.combos) | set(self.components)
 
     def role(self, ticker: str | None) -> str | None:
         if ticker in self.combos:
@@ -318,6 +337,32 @@ class SlateRegistry:
         if ticker in self.components:
             return "component"
         return None
+
+    def touch_combo(self, ticker: str | None, now: float | None = None) -> None:
+        if ticker in self.combos:
+            self.combos.move_to_end(ticker)
+            self.combo_last_seen[ticker] = time.monotonic() if now is None else now
+
+    def remove_combos(self, tickers) -> None:
+        for ticker in tickers:
+            if ticker in self.combos:
+                self.combos.pop(ticker, None)
+                self.combo_last_seen.pop(ticker, None)
+                self.evicted_tickers.append(ticker)
+
+    def evict_stale(self, now: float | None = None) -> list[str]:
+        now = time.monotonic() if now is None else now
+        stale = [
+            ticker
+            for ticker, seen_at in self.combo_last_seen.items()
+            if now - seen_at >= self.combo_idle_seconds
+        ]
+        self.remove_combos(stale)
+        return stale
+
+    def take_evicted_tickers(self) -> list[str]:
+        evicted, self.evicted_tickers = self.evicted_tickers, []
+        return evicted
 
     def add_combo(self, row: dict, source: str) -> list[str]:
         if not is_slate_combo(row, self.event_games, self.combo_scope):
@@ -345,12 +390,16 @@ class SlateRegistry:
             "mve_selected_legs": legs,
         }
         self.combos[ticker] = combo
+        self.touch_combo(ticker)
         new_tickers = [ticker] if is_new_combo else []
         for leg in legs:
             component = leg["market_ticker"]
             if component not in self.components:
-                self.components.add(component)
+                self.components[component] = None
                 new_tickers.append(component)
+                if len(self.components) > self.max_components:
+                    evicted, _ = self.components.popitem(last=False)
+                    self.evicted_tickers.append(evicted)
         if combo != existing:
             self.writer.write(
                 {
@@ -361,6 +410,11 @@ class SlateRegistry:
                     "combo": combo,
                 }
             )
+        while len(self.combos) > self.max_combos:
+            oldest = next(iter(self.combos))
+            self.remove_combos([oldest])
+            if oldest == ticker:
+                new_tickers = [value for value in new_tickers if value != ticker]
         return sorted(new_tickers)
 
     def add_component_metadata(self, markets: list[dict]) -> None:
@@ -618,13 +672,19 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
     client = KalshiClient(authenticated=True)
     client.key_id = key_id
     client.private_key = private_key
-    registry = SlateRegistry(manifest, writer)
+    registry = SlateRegistry(
+        manifest,
+        writer,
+        max_combos=args.max_active_combos,
+        max_components=args.state_max_tickers,
+        combo_idle_seconds=args.combo_idle_seconds,
+    )
     fill_since = int(time.time()) - 300
-    seen_fills: set[str] = set()
+    seen_fills = RecentSet(args.dedupe_entries)
     fills_received = 0
     fill_api_available = True
-    settled_combos: set[str] = set()
-    seen_communications: set[tuple] = set()
+    settled_combo_count = 0
+    seen_communications = RecentSet(args.dedupe_entries)
     duplicate_communications_skipped = 0
     rfqs_persisted = 0
     last_rfq_at = None
@@ -768,9 +828,33 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
         return
 
     started = time.monotonic()
-    state = MarketState(sorted(registry.tickers), args.top_size_change)
-    market_queue: asyncio.Queue[list[str]] = asyncio.Queue()
+    state = MarketState(
+        [],
+        args.top_size_change,
+        max_tickers=args.state_max_tickers,
+        dedupe_entries=args.dedupe_entries,
+    )
+    state.add_tickers(sorted(registry.components), pinned=True)
+    state.add_tickers(sorted(registry.combos))
+    market_queue: asyncio.Queue[list[str]] = asyncio.Queue(
+        maxsize=args.max_pending_market_batches
+    )
+    pending_market_batches_dropped = 0
+    pending_market_tickers_dropped = 0
     communication_messages_received = 0
+
+    def apply_registry_evictions() -> None:
+        state.remove_tickers(registry.take_evicted_tickers())
+
+    def queue_new_markets(tickers: list[str]) -> None:
+        nonlocal pending_market_batches_dropped, pending_market_tickers_dropped
+        if not tickers:
+            return
+        try:
+            market_queue.put_nowait(tickers)
+        except asyncio.QueueFull:
+            pending_market_batches_dropped += 1
+            pending_market_tickers_dropped += len(tickers)
 
     async def collect_communications() -> None:
         nonlocal duplicate_communications_skipped
@@ -839,16 +923,15 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                                 msg, registry.event_games, registry.combo_scope
                             )
                         )
+                        registry.touch_combo(msg.get("market_ticker"))
                         if not is_new_slate_rfq and registry.role(
                             msg.get("market_ticker")
                         ) != "combo":
                             continue
                         identity = communication_identity(raw)
-                        if identity and identity in seen_communications:
+                        if identity and not seen_communications.add(identity):
                             duplicate_communications_skipped += 1
                             continue
-                        if identity:
-                            seen_communications.add(identity)
                         record = communication_record(raw, received_at)
                         record["connection_id"] = connection_id
                         writer.write(record, flush=is_new_slate_rfq)
@@ -864,9 +947,14 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                             {**msg, "ticker": msg.get("market_ticker")},
                             "communications",
                         )
+                        apply_registry_evictions()
                         if new_tickers:
-                            state.add_tickers(new_tickers)
-                            market_queue.put_nowait(new_tickers)
+                            new_components = set(registry.components).intersection(new_tickers)
+                            state.add_tickers(sorted(new_components), pinned=True)
+                            state.add_tickers(
+                                sorted(set(new_tickers) - new_components)
+                            )
+                            queue_new_markets(new_tickers)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -903,6 +991,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                         ws, command_id, registry, sorted(registry.tickers)
                     )
                 state.add_tickers(sorted(registry.tickers))
+                state.add_tickers(sorted(registry.components), pinned=True)
 
                 async def process_new_markets() -> None:
                     nonlocal command_id
@@ -914,7 +1003,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                         command_id = await subscribe_market_data(
                             ws, command_id, registry, sorted(batch)
                         )
-                        components = batch & registry.components
+                        components = batch & set(registry.components)
                         if components:
                             metadata = await asyncio.to_thread(
                                 market_metadata, client, components
@@ -930,6 +1019,8 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                         now = time.monotonic()
                         if now - last_heartbeat >= args.heartbeat_seconds:
                             await poll_fills()
+                            registry.evict_stale(now)
+                            apply_registry_evictions()
                             writer.status(
                                 "heartbeat",
                                 connection_id=connection_id,
@@ -937,7 +1028,7 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                                 combo_count=len(registry.combos),
                                 component_count=len(registry.components),
                                 books_initialized=len(state.initialized),
-                                settled_combo_count=len(settled_combos),
+                                settled_combo_count=settled_combo_count,
                                 fills_received=fills_received,
                                 fill_api_available=fill_api_available,
                                 communication_messages_received=communication_messages_received,
@@ -945,6 +1036,13 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                                 rfqs_persisted=rfqs_persisted,
                                 duplicate_communications_skipped=duplicate_communications_skipped,
                                 pending_market_batches=market_queue.qsize(),
+                                pending_market_batches_dropped=pending_market_batches_dropped,
+                                pending_market_tickers_dropped=pending_market_tickers_dropped,
+                                market_state_tickers=len(state.tickers),
+                                market_state_tickers_evicted=state.tickers_evicted,
+                                trade_dedupe_entries=len(state.seen_trade_ids),
+                                communication_dedupe_entries=len(seen_communications),
+                                fill_dedupe_entries=len(seen_fills),
                                 last_rfq_at=last_rfq_at,
                                 last_rfq_exchange_at=last_rfq_exchange_at,
                                 last_rfq_persistence_lag_ms=last_rfq_persistence_lag_ms,
@@ -980,9 +1078,15 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                         ):
                             market = await fetch_new_market(client, ticker)
                             new_tickers = registry.add_combo(market, "multivariate_lifecycle")
+                            apply_registry_evictions()
                             if new_tickers:
-                                state.add_tickers(new_tickers)
-                                market_queue.put_nowait(new_tickers)
+                                new_components = set(registry.components).intersection(new_tickers)
+                                state.add_tickers(sorted(new_components), pinned=True)
+                                state.add_tickers(
+                                    sorted(set(new_tickers) - new_components)
+                                )
+                                queue_new_markets(new_tickers)
+                        registry.touch_combo(ticker, now)
                         for record in state.process(raw, received_at):
                             record["connection_id"] = connection_id
                             record["market_role"] = registry.role(record.get("market_ticker"))
@@ -995,8 +1099,10 @@ async def collect(args: argparse.Namespace, manifest: dict, writer: Writer) -> N
                                     or record.get("status") == "settled"
                                 )
                             ):
-                                settled_combos.add(record["market_ticker"])
+                                settled_combo_count += 1
+                                registry.remove_combos([record["market_ticker"]])
                             writer.write(record)
+                        apply_registry_evictions()
                 finally:
                     market_worker.cancel()
                     with suppress(asyncio.CancelledError):
@@ -1071,6 +1177,31 @@ def parse_args() -> argparse.Namespace:
         "--target-storage-bytes",
         type=int,
         default=int(os.getenv("KALSHI_TARGET_STORAGE_BYTES", "2750000000")),
+    )
+    parser.add_argument(
+        "--state-max-tickers",
+        type=int,
+        default=int(os.getenv("KALSHI_STATE_MAX_TICKERS", "10000")),
+    )
+    parser.add_argument(
+        "--dedupe-entries",
+        type=int,
+        default=int(os.getenv("KALSHI_DEDUPE_ENTRIES", "100000")),
+    )
+    parser.add_argument(
+        "--max-active-combos",
+        type=int,
+        default=int(os.getenv("KALSHI_MAX_ACTIVE_COMBOS", "10000")),
+    )
+    parser.add_argument(
+        "--combo-idle-seconds",
+        type=float,
+        default=float(os.getenv("KALSHI_COMBO_IDLE_SECONDS", "3600")),
+    )
+    parser.add_argument(
+        "--max-pending-market-batches",
+        type=int,
+        default=int(os.getenv("KALSHI_MAX_PENDING_MARKET_BATCHES", "1000")),
     )
     return parser.parse_args()
 

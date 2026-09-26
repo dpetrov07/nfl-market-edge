@@ -94,6 +94,10 @@ Keep Kalshi running through settlement, then evaluate the captured slate:
   --manifest config/combo_slate.json
 ```
 
+The Kalshi worker keeps bounded recent dedupe and active-market state while the
+complete event/RFQ history is streamed to its JSONL archives. Re-run the
+synthetic memory soak with `.venv/bin/python -m scripts.soak_kalshi_memory`.
+
 Captures land under `data/live/combo_slates/<slate_id>/`; evaluation results go
 to `research/output/<slate_id>/prospective/`. The shadow-pricing command can run
 before settlement and writes CSV/Parquet decisions plus a summary under

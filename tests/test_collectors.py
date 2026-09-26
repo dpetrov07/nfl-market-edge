@@ -1,8 +1,13 @@
+import time
 import unittest
 
-from nfl_market_edge.kalshi import MarketState
+from nfl_market_edge.kalshi import MarketState, RecentSet
 from nfl_market_edge.sportsbook import validate_selection_state
-from scripts.collect_live_combo_slate import is_slate_combo, subscribe_market_data
+from scripts.collect_live_combo_slate import (
+    SlateRegistry,
+    is_slate_combo,
+    subscribe_market_data,
+)
 from scripts.collect_live_sportsbook_props import (
     fanduel_runner_line,
     fanduel_runner_subject,
@@ -12,6 +17,18 @@ from scripts.collect_live_sportsbook_props import (
 
 
 class CollectorTest(unittest.TestCase):
+    def test_recent_set_has_a_fixed_replay_window(self):
+        values = RecentSet(2)
+
+        self.assertTrue(values.add("one"))
+        self.assertFalse(values.add("one"))
+        values.add("two")
+        values.add("three")
+
+        self.assertEqual(len(values), 2)
+        self.assertNotIn("one", values)
+        self.assertIn("three", values)
+
     def test_cross_game_filter_uses_game_suffix_not_series(self):
         event_games = {
             "26SEP20MINCHI": "MIN @ CHI",
@@ -126,6 +143,60 @@ class CollectorTest(unittest.TestCase):
         }
 
         self.assertEqual(state.process(empty, "now"), [])
+
+    def test_market_state_evicts_old_books_and_trade_ids(self):
+        state = MarketState([], max_tickers=2, dedupe_entries=2)
+        state.add_tickers(["component"], pinned=True)
+        state.add_tickers(["combo-1", "combo-2"])
+        for index in range(3):
+            state.process(
+                {
+                    "type": "trade",
+                    "msg": {
+                        "market_ticker": "combo-2",
+                        "trade_id": f"trade-{index}",
+                    },
+                },
+                "now",
+            )
+
+        self.assertEqual(state.tickers, {"component", "combo-2"})
+        self.assertNotIn("combo-1", state.books)
+        self.assertEqual(len(state.seen_trade_ids), 2)
+
+    def test_registry_streams_discovery_and_evicts_old_combos(self):
+        class Writer:
+            def __init__(self):
+                self.records = []
+
+            def write(self, record):
+                self.records.append(record)
+
+        manifest = {
+            "slate_id": "slate",
+            "event_games": {"GAME1": "A @ B", "GAME2": "C @ D"},
+        }
+        writer = Writer()
+        registry = SlateRegistry(
+            manifest, writer, max_combos=2, combo_idle_seconds=10
+        )
+        for index in range(3):
+            registry.add_combo(
+                {
+                    "ticker": f"combo-{index}",
+                    "mve_selected_legs": [
+                        {"event_ticker": "SERIES-GAME1", "market_ticker": "leg-1"},
+                        {"event_ticker": "SERIES-GAME2", "market_ticker": "leg-2"},
+                    ],
+                },
+                "test",
+            )
+
+        self.assertEqual(list(registry.combos), ["combo-1", "combo-2"])
+        self.assertEqual(registry.take_evicted_tickers(), ["combo-0"])
+        self.assertEqual(len(writer.records), 3)
+        expired = registry.evict_stale(now=time.monotonic() + 11)
+        self.assertEqual(expired, ["combo-1", "combo-2"])
 
 
 class SubscriptionTest(unittest.IsolatedAsyncioTestCase):
