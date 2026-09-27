@@ -1075,6 +1075,7 @@ def append_records(output_dir: Path, records: list[dict], sport: str) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument(
         "--book",
         choices=("bovada", "fanduel", "betrivers"),
@@ -1106,10 +1107,20 @@ def parse_args() -> argparse.Namespace:
         help="Re-confirm unchanged selections this often; changes are always immediate",
     )
     args = parser.parse_args()
+    manifest_games = []
+    if args.manifest:
+        manifest = json.loads(args.manifest.read_text())
+        args.slate_id = manifest["slate_id"]
+        args.sport = "ncaaf" if manifest["league"].lower() == "cfb" else "nfl"
+        manifest_games = [
+            event.get("game")
+            for event in manifest["events"]
+            if isinstance(event, dict) and event.get("game")
+        ]
     configured_games = os.getenv("SPORTSBOOK_GAMES") or os.getenv(
         "SPORTSBOOK_GAME", ""
     )
-    args.games = args.game or [
+    args.games = args.game or manifest_games or [
         game.strip() for game in configured_games.split(",") if game.strip()
     ]
     if not args.games:

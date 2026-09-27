@@ -1,0 +1,24 @@
+{
+  "slate_id": "nfl-2026-09-27",
+  "league": "nfl",
+  "date": "2026-09-27",
+  "combo_scope": "cross_game",
+  "initial_scan_pages": 5,
+  "events": [
+    {"ticker": "KXNFLGAME-26SEP27LACBUF", "game": "Los Angeles Chargers @ Buffalo Bills"},
+    {"ticker": "KXNFLGAME-26SEP27CARCLE", "game": "Carolina Panthers @ Cleveland Browns"},
+    {"ticker": "KXNFLGAME-26SEP27NYJDET", "game": "New York Jets @ Detroit Lions"},
+    {"ticker": "KXNFLGAME-26SEP27HOUIND", "game": "Houston Texans @ Indianapolis Colts"},
+    {"ticker": "KXNFLGAME-26SEP27NEJAC", "game": "New England Patriots @ Jacksonville Jaguars"},
+    {"ticker": "KXNFLGAME-26SEP27KCMIA", "game": "Kansas City Chiefs @ Miami Dolphins"},
+    {"ticker": "KXNFLGAME-26SEP27TENNYG", "game": "Tennessee Titans @ New York Giants"},
+    {"ticker": "KXNFLGAME-26SEP27CINPIT", "game": "Cincinnati Bengals @ Pittsburgh Steelers"},
+    {"ticker": "KXNFLGAME-26SEP27SEAWAS", "game": "Seattle Seahawks @ Washington Commanders"},
+    {"ticker": "KXNFLGAME-26SEP27ARISF", "game": "Arizona Cardinals @ San Francisco 49ers"},
+    {"ticker": "KXNFLGAME-26SEP27MINTB", "game": "Minnesota Vikings @ Tampa Bay Buccaneers"},
+    {"ticker": "KXNFLGAME-26SEP27LVNO", "game": "Las Vegas Raiders @ New Orleans Saints"},
+    {"ticker": "KXNFLGAME-26SEP27BALDAL", "game": "Baltimore Ravens @ Dallas Cowboys"},
+    {"ticker": "KXNFLGAME-26SEP27LARDEN", "game": "Los Angeles Rams @ Denver Broncos"}
+  ],
+  "combo_tickers": []
+}
